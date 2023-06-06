@@ -25,36 +25,38 @@ typedef struct {
  * Replace wiki bold and italic markdup with markdown markup.
  */
 static void
-parse_bold_and_italic (char line[MAX_LINE_LENGTH])
+parse_inline_tag (char line[MAX_LINE_LENGTH], const char *wiki_open, const char *wiki_close, const char *md_open, const char *md_close)
 {
   char result[MAX_LINE_LENGTH] = {0};
   char *ptr = line;
   char *result_ptr = result;
-  int wiki_tag_len = 5; // '''''
-  int md_tag_len = 3; // **_ / _**
+  int wiki_open_len = strlen (wiki_open);
+  int wiki_close_len = strlen (wiki_close);
+  int md_open_len = strlen (md_open);
+  int md_close_len = strlen (md_close);
 
   while (true)
     {
-      char *start = strstr (ptr, "'''''");
+      char *start = strstr (ptr, wiki_open);
       if (!start)
         break;
 
-      if ((size_t) (start - line) + 5 >= strlen (line))
+      if ((size_t) (start - line) + wiki_open_len +  wiki_close_len >= strlen (line))
         break;
 
-      char *end = strstr (start + 5, "'''''");
+      char *end = strstr (start + wiki_open_len, wiki_close);
       if (!end)
         break;
 
-      snprintf (result_ptr, start - ptr + 1, "%s**_", ptr);
+      snprintf (result_ptr, start - ptr + 1, "%s", ptr);
       result_ptr += start - ptr;
-      snprintf (result_ptr, md_tag_len + 1, "**_");
-      result_ptr += md_tag_len;
-      ptr += (start - ptr) + wiki_tag_len;
-      snprintf (result_ptr, end - ptr + 1, "%s_**", ptr);
-      result_ptr += end - start - wiki_tag_len;
-      snprintf (result_ptr, md_tag_len + 1, "_**");
-      result_ptr += md_tag_len;
+      snprintf (result_ptr, md_open_len + 1, "%s", md_open);
+      result_ptr += md_open_len;
+      ptr += (start - ptr) + wiki_open_len;
+      snprintf (result_ptr, end - ptr + 1, "%s", ptr);
+      result_ptr += end - start - wiki_close_len;
+      snprintf (result_ptr, md_close_len + 1, "%s", md_close);
+      result_ptr += md_close_len;
       ptr += end - start;
     }
 
@@ -62,7 +64,7 @@ parse_bold_and_italic (char line[MAX_LINE_LENGTH])
     snprintf (result_ptr, strlen (line) - (ptr - line) + 1, "%s", ptr);
 
   if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", result) > MAX_LINE_LENGTH)
-    fprintf (stderr, "parse_bold_and_italic() : warning : truncated line : %s.\n", line);
+    fprintf (stderr, "parse_inline_tag() : warning : truncated line : %s.\n", line);
 }
 
 /*
@@ -133,7 +135,9 @@ convert (const char *filename)
         break;
 
       parse_heading (line);
-      parse_bold_and_italic (line);
+      parse_inline_tag (line, "'''''", "'''''", "**_", "_**");
+      parse_inline_tag (line, "'''", "'''", "**", "**");
+      parse_inline_tag (line, "''", "''", "_", "_");
 
       printf ("%s", line);
     }
