@@ -1,9 +1,22 @@
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 #define MAX_LINE_LENGTH 10000
+
+/*
+ * TODO
+ *
+ * <nowiki>
+ * bullet lists
+ * numbered lists
+ * definition lists
+ * indent text
+ * preformatted text
+ * preformatted code blocks
+ */
 
 static void
 usage (const char *progname)
@@ -19,6 +32,8 @@ typedef struct {
   int template;
   bool nowiki;
   bool definition_list;
+  bool last_line_was_blank;
+  bool needs_empty_lines;
 } parser_memory_t;
 
 /*
@@ -71,7 +86,7 @@ parse_inline_tag (char line[MAX_LINE_LENGTH], const char *wiki_open, const char 
  * Replace wiki headings with markdown headings.
  */
 static void
-parse_heading (char line[MAX_LINE_LENGTH])
+parse_heading (char line[MAX_LINE_LENGTH], parser_memory_t *parser_memory)
 {
   if (strncmp (line, "==", 2) != 0)
     return;
@@ -110,8 +125,29 @@ parse_heading (char line[MAX_LINE_LENGTH])
 
   char original[MAX_LINE_LENGTH] = {0};
   snprintf (original, MAX_LINE_LENGTH - 1, "%s", line);
-  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s %s\n\n", tag, rest) > MAX_LINE_LENGTH)
+  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s %s\n", tag, rest) > MAX_LINE_LENGTH)
     fprintf (stderr, "parse_heading() : warning: truncated line : %s\n", rest);
+
+  parser_memory->needs_empty_lines = true;
+}
+
+/*
+ * Replace wiki horizontal ines with markdown ones.
+ */
+static void
+parse_horizontal_rule (char line[MAX_LINE_LENGTH], parser_memory_t *parser_memory)
+{
+  if (strncmp (line, "----", 4) != 0)
+    return;
+
+  char *ptr = line + 4;
+  for (size_t i = 0; i < strlen (ptr); i++)
+    if (!isspace (ptr[i]))
+      return;
+
+  line[2] = '\n';
+  line[3] = 0;
+  parser_memory->needs_empty_lines = true;
 }
 
 static int
@@ -127,19 +163,69 @@ convert (const char *filename)
       goto cleanup;
     }
 
+  bool first_line = true;
+  bool last_line = false;
   char line[MAX_LINE_LENGTH] = {0};
+  char next_line[MAX_LINE_LENGTH] = {0};
+  parser_memory_t parser_memory = {0};
 
   while (1)
     {
-      if (!fgets (line, MAX_LINE_LENGTH - 1, file))
+      if (last_line)
         break;
 
-      parse_heading (line);
+      if (first_line)
+        {
+          if (!fgets (line, MAX_LINE_LENGTH - 1, file))
+            break;
+          first_line = false;
+        }
+      else
+        {
+          if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", next_line) > MAX_LINE_LENGTH - 1)
+            fprintf (stderr, "convert() : warning : last character of next line truncated.\n");
+
+          if (!fgets (next_line, MAX_LINE_LENGTH - 1, file))
+            {
+              last_line = true;
+              next_line[0] = 0;
+            }
+        }
+
+      parse_heading (line, &parser_memory);
+      parse_horizontal_rule (line, &parser_memory);
       parse_inline_tag (line, "'''''", "'''''", "**_", "_**");
       parse_inline_tag (line, "'''", "'''", "**", "**");
       parse_inline_tag (line, "''", "''", "_", "_");
 
+      if (parser_memory.needs_empty_lines && !parser_memory.last_line_was_blank)
+        puts ("");
+
       printf ("%s", line);
+
+      bool was_blank = true;
+      for (size_t i = 0; i < strlen (line); i++)
+        if (!isspace (line[i]))
+          was_blank = false;
+      parser_memory.last_line_was_blank = was_blank;
+
+      if (parser_memory.needs_empty_lines)
+        {
+          bool next_line_empty = true;
+          if (strlen (next_line))
+            for (size_t i = 0; i < strlen (next_line); i++)
+              if (!isspace (next_line[i]))
+                {
+                  next_line_empty = false;
+                  break;
+                }
+
+          if (!next_line_empty)
+            puts ("");
+
+          parser_memory.needs_empty_lines = false;
+          parser_memory.last_line_was_blank = true;
+        }
     }
 
   cleanup:
