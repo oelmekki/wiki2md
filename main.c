@@ -10,7 +10,6 @@
  * TODO
  *
  * <nowiki>
- * numbered lists
  * definition lists
  * indent text
  * preformatted text
@@ -198,6 +197,53 @@ parse_bullet_list (char line[MAX_LINE_LENGTH])
     fprintf (stderr, "parse_bullet_list() : warning: truncated line : %s\n", result);
 }
 
+/*
+ * Replace wiki numbered list items with markdown ones.
+ */
+static void
+parse_numbered_list (char line[MAX_LINE_LENGTH])
+{
+  if (line[0] != '#')
+    return;
+
+  if (strlen (line) < 2)
+    return;
+
+  size_t list_level = 0;
+  char *ptr = line + 1;
+  while (ptr[0] == '#')
+    {
+      list_level++;
+      ptr++;
+    }
+
+  char result[MAX_LINE_LENGTH] = {0};
+  char *result_ptr = result;
+    for (size_t i = 0; i < list_level; i++)
+      {
+        if ((result_ptr - result) + 2 >= MAX_LINE_LENGTH)
+          {
+            fprintf (stderr, "parse_numbered_list() : too many list sub levels.\n");
+            return;
+          }
+        snprintf (result_ptr, 3, "  ");
+        result_ptr += 2;
+      }
+
+  if ((result_ptr - result) + 3 + strlen (ptr) >= MAX_LINE_LENGTH)
+    {
+      fprintf (stderr, "parse_numbered_list() : line is too long.\n");
+      return;
+    }
+
+  snprintf (result_ptr, 3, "1.");
+  result_ptr += 2;
+
+  snprintf (result_ptr, MAX_LINE_LENGTH - (result_ptr - result), "%s", ptr);
+  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", result) > MAX_LINE_LENGTH - 1)
+    fprintf (stderr, "parse_numbered_list() : warning: truncated line : %s\n", result);
+}
+
 static int
 convert (const char *filename)
 {
@@ -240,12 +286,13 @@ convert (const char *filename)
             }
         }
 
+      parse_bullet_list (line);
+      parse_numbered_list (line);
       parse_heading (line, &parser_memory);
       parse_horizontal_rule (line, &parser_memory);
       parse_inline_tag (line, "'''''", "'''''", "**_", "_**");
       parse_inline_tag (line, "'''", "'''", "**", "**");
       parse_inline_tag (line, "''", "''", "_", "_");
-      parse_bullet_list (line);
 
       if (parser_memory.needs_empty_lines && !parser_memory.last_line_was_blank)
         puts ("");
