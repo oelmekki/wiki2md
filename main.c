@@ -1,22 +1,16 @@
+/*
+ * All int returning functions returns non-zero in case of error, unless
+ * explicitly mentioned.
+ */
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_LINE_LENGTH 10000
-
-/*
- * TODO
- *
- * <nowiki>
- * definition lists
- * indent text
- * preformatted text
- * preformatted code blocks
- * links
- * tables
- */
+#include "utils.h"
 
 static void
 usage (const char *progname)
@@ -24,303 +18,267 @@ usage (const char *progname)
   printf ("\
 %s [-h|--help] <wikitext-file> \n\
 \n\
-Convert the provided file in mediawiki markup to markdown. \n\
+Convert the provided file in mediawiki markup to markdown, printed on stdout. \n\
   ", progname);
 }
 
-typedef struct {
-  int template;
-  bool nowiki;
-  bool definition_list;
-  bool last_line_was_blank;
-  bool needs_empty_lines;
-} parser_memory_t;
+#define MAX_LINE_LENGTH 10000
+#define MAX_FILE_SIZE 500000
+
+enum {
+  NODE_ROOT,
+  NODE_TEXT,
+  NODE_PARAGRAPH,
+  NODE_HEADING,
+  NODE_STRONG,
+  NODE_EMPHASIS,
+  NODE_STRONG_AND_EMPHASIS,
+  NODE_BULLET_LIST,
+  NODE_BULLET_LIST_ITEM,
+  NODE_NUMBERED_LIST,
+  NODE_NUMBERED_LIST_ITEM,
+  NODE_HORIZONTAL_RULE,
+  NODE_NOWIKI,
+  NODE_DEFINITION_LIST,
+  NODE_DEFINITION_LIST_TERM,
+  NODE_DEFINITION_LIST_DEFINITION,
+  NODE_INDENT,
+  NODE_PREFORMATTED_TEXT,
+  NODE_PREFORMATTED_CODE_BLOCK,
+  NODE_LINK,
+  NODE_TABLE,
+};
+
+typedef struct _node_t {
+  int type;
+  char *text_content;
+  struct _node_t **children;
+  size_t children_len;
+  struct _node_t *parent;
+  struct _node_t *last_child;
+  struct _node_t *previous_sibling;
+  struct _node_t *next_sibling;
+} node_t;
 
 /*
- * Replace wiki bold and italic markdup with markdown markup.
+ * Add a child to a parent's memory.
  */
 static void
-parse_inline_tag (char line[MAX_LINE_LENGTH], const char *wiki_open, const char *wiki_close, const char *md_open, const char *md_close)
+append_child (node_t *parent, node_t *child)
 {
-  char result[MAX_LINE_LENGTH] = {0};
-  char *ptr = line;
-  char *result_ptr = result;
-  int wiki_open_len = strlen (wiki_open);
-  int wiki_close_len = strlen (wiki_close);
-  int md_open_len = strlen (md_open);
-  int md_close_len = strlen (md_close);
+  parent->children_len++;
+  parent->children = xrealloc (parent->children, parent->children_len * sizeof (*child));
+  parent->children[parent->children_len - 1] = child;
 
-  while (true)
-    {
-      char *start = strstr (ptr, wiki_open);
-      if (!start)
-        break;
+  child->parent = parent;
+  parent->last_child = child;
 
-      if ((size_t) (start - line) + wiki_open_len +  wiki_close_len >= strlen (line))
-        break;
-
-      char *end = strstr (start + wiki_open_len, wiki_close);
-      if (!end)
-        break;
-
-      snprintf (result_ptr, start - ptr + 1, "%s", ptr);
-      result_ptr += start - ptr;
-      snprintf (result_ptr, md_open_len + 1, "%s", md_open);
-      result_ptr += md_open_len;
-      ptr += (start - ptr) + wiki_open_len;
-      snprintf (result_ptr, end - ptr + 1, "%s", ptr);
-      result_ptr += end - start - wiki_close_len;
-      snprintf (result_ptr, md_close_len + 1, "%s", md_close);
-      result_ptr += md_close_len;
-      ptr += end - start;
-    }
-
-  if ((size_t) (ptr - line) < strlen (line))
-    snprintf (result_ptr, strlen (line) - (ptr - line) + 1, "%s", ptr);
-
-  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", result) > MAX_LINE_LENGTH)
-    fprintf (stderr, "parse_inline_tag() : warning : truncated line : %s.\n", line);
+  if (parent->children_len > 1)
+    parent->children[parent->children_len - 2]->next_sibling = child;
 }
 
 /*
- * Replace wiki headings with markdown headings.
+ * Add text to a text node.
  */
-static void
-parse_heading (char line[MAX_LINE_LENGTH], parser_memory_t *parser_memory)
-{
-  if (strncmp (line, "==", 2) != 0)
-    return;
-
-  size_t head_level = 1;
-  char *ptr = line + 2;
-  while (ptr[0] == '=')
-    {
-      head_level++;
-      ptr++;
-    }
-
-  if (head_level > 6)
-    return;
-
-  char tag[10] = {0};
-  for (size_t i = 0; i < head_level; i++)
-    tag[i] = '#';
-
-  char rest[MAX_LINE_LENGTH] = {0};
-  snprintf (rest, MAX_LINE_LENGTH - 1, "%s", line + 1 + head_level);
-  size_t len = strlen (rest);
-  bool start_removing = false;
-  for (size_t i = len - 1; i > 0; i--)
-    {
-      if (rest[i] == '=')
-        {
-          rest[i] = 0;
-          start_removing = true;
-          continue;
-        }
-
-      if (rest[i] != '=' && start_removing)
-        break;
-    }
-
-  char original[MAX_LINE_LENGTH] = {0};
-  snprintf (original, MAX_LINE_LENGTH - 1, "%s", line);
-  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s %s\n", tag, rest) > MAX_LINE_LENGTH)
-    fprintf (stderr, "parse_heading() : warning: truncated line : %s\n", rest);
-
-  parser_memory->needs_empty_lines = true;
-}
-
-/*
- * Replace wiki horizontal lines with markdown ones.
- */
-static void
-parse_horizontal_rule (char line[MAX_LINE_LENGTH], parser_memory_t *parser_memory)
-{
-  if (strncmp (line, "----", 4) != 0)
-    return;
-
-  char *ptr = line + 4;
-  for (size_t i = 0; i < strlen (ptr); i++)
-    if (!isspace (ptr[i]))
-      return;
-
-  line[2] = '\n';
-  line[3] = 0;
-  parser_memory->needs_empty_lines = true;
-}
-
-/*
- * Replace wiki list items with markdown ones.
- */
-static void
-parse_bullet_list (char line[MAX_LINE_LENGTH])
-{
-  if (line[0] != '*')
-    return;
-
-  if (strlen (line) < 2)
-    return;
-
-  size_t list_level = 0;
-  char *ptr = line + 1;
-  while (ptr[0] == '*')
-    {
-      list_level++;
-      ptr++;
-    }
-
-  char result[MAX_LINE_LENGTH] = {0};
-  char *result_ptr = result;
-    for (size_t i = 0; i < list_level; i++)
-      {
-        if ((result_ptr - result) + 2 >= MAX_LINE_LENGTH)
-          {
-            fprintf (stderr, "parse_bullet_list() : too many list sub levels.\n");
-            return;
-          }
-        snprintf (result_ptr, 3, "  ");
-        result_ptr += 2;
-      }
-
-  if ((result_ptr - result) + 2 + strlen (ptr) >= MAX_LINE_LENGTH)
-    {
-      fprintf (stderr, "parse_bullet_list() : line is too long.\n");
-      return;
-    }
-
-  result_ptr[0] = '*';
-  result_ptr++;
-
-  snprintf (result_ptr, MAX_LINE_LENGTH - (result_ptr - result), "%s", ptr);
-  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", result) > MAX_LINE_LENGTH - 1)
-    fprintf (stderr, "parse_bullet_list() : warning: truncated line : %s\n", result);
-}
-
-/*
- * Replace wiki numbered list items with markdown ones.
- */
-static void
-parse_numbered_list (char line[MAX_LINE_LENGTH])
-{
-  if (line[0] != '#')
-    return;
-
-  if (strlen (line) < 2)
-    return;
-
-  size_t list_level = 0;
-  char *ptr = line + 1;
-  while (ptr[0] == '#')
-    {
-      list_level++;
-      ptr++;
-    }
-
-  char result[MAX_LINE_LENGTH] = {0};
-  char *result_ptr = result;
-    for (size_t i = 0; i < list_level; i++)
-      {
-        if ((result_ptr - result) + 2 >= MAX_LINE_LENGTH)
-          {
-            fprintf (stderr, "parse_numbered_list() : too many list sub levels.\n");
-            return;
-          }
-        snprintf (result_ptr, 3, "  ");
-        result_ptr += 2;
-      }
-
-  if ((result_ptr - result) + 3 + strlen (ptr) >= MAX_LINE_LENGTH)
-    {
-      fprintf (stderr, "parse_numbered_list() : line is too long.\n");
-      return;
-    }
-
-  snprintf (result_ptr, 3, "1.");
-  result_ptr += 2;
-
-  snprintf (result_ptr, MAX_LINE_LENGTH - (result_ptr - result), "%s", ptr);
-  if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", result) > MAX_LINE_LENGTH - 1)
-    fprintf (stderr, "parse_numbered_list() : warning: truncated line : %s\n", result);
-}
-
 static int
-convert (const char *filename)
+append_text (node_t *text_node, const char *text)
+{
+  if (text_node->type != NODE_TEXT)
+    {
+      fprintf (stderr, "append_text() : error : trying to add text to a non text node.\n");
+      return 1;
+    }
+
+  size_t len = text_node->text_content ? strlen (text_node->text_content) : 0;
+  text_node->text_content = xrealloc (text_node->text_content, len + strlen (text) + 1);
+  snprintf (text_node->text_content + len, strlen (text) + 1, "%s", text);
+
+  return 0;
+}
+
+/*
+ * Cleanup memory for a node.
+ */
+static void
+free_node (node_t *node)
+{
+  if (node->text_content)
+    free (node->text_content);
+
+  if (node->children)
+    {
+      for (size_t i = 0; i < node->children_len; i++)
+        free_node (node->children[i]);
+
+      free (node->children);
+    }
+
+  free (node);
+}
+
+/*
+ * Write text buffer to text node.
+ */
+static int
+flush_text_buffer (node_t *current_node, char *buffer, char **buffer_ptr)
 {
   int err = 0;
+
+  if (!current_node->children || current_node->last_child->type != NODE_TEXT)
+    {
+      node_t *text_node = xalloc (sizeof *text_node);
+      text_node->type = NODE_TEXT;
+      append_child (current_node, text_node);
+    }
+
+  err = append_text (current_node->last_child, buffer);
+  if (err)
+    {
+      fprintf (stderr, "flush_text_buffer() : error while append text to text node.\n");
+      return err;
+    }
+
+  *buffer_ptr = buffer;
+
+  return err;
+}
+
+/*
+ * Parse mediawiki paragraph.
+ *
+ * A paragraph is a block of text ending in "\n\n".
+ *
+ */
+static int
+parse_paragraph_end (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+{
+  int err = 0;
+
+  if (strncmp (*reading_ptr, "\n\n", 2) != 0)
+    return err;
+
+  err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+  if (err)
+    {
+      fprintf (stderr, "parse_strong_and_emphasis() : error while append flushing text buffer.\n");
+      return err;
+    }
+
+  if (strlen (*reading_ptr) > 2)
+    {
+      node_t *new_paragraph = xalloc (sizeof *new_paragraph);
+      new_paragraph->type = NODE_PARAGRAPH;
+      append_child ((*current_node)->parent, new_paragraph);
+      *current_node = new_paragraph;
+    }
+
+  *reading_ptr += 2;
+
+  return err;
+}
+
+/*
+ * Parse mediawiki tag adding both strong and emphasis :
+ *
+ *    '''''content'''''
+ */
+static int
+parse_strong_and_emphasis (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+{
+  int err = 0;
+
+  if (strncmp (*reading_ptr, "'''''", 5) != 0)
+    return err;
+
+  err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+  if (err)
+    {
+      fprintf (stderr, "parse_strong_and_emphasis() : error while append flushing text buffer.\n");
+      return err;
+    }
+
+  if ((*current_node)->type == NODE_STRONG_AND_EMPHASIS)
+    *current_node = (*current_node)->parent;
+  else
+    {
+      node_t *strong_and_emphasis = xalloc (sizeof *strong_and_emphasis);
+      strong_and_emphasis->type = NODE_STRONG_AND_EMPHASIS;
+      append_child (*current_node, strong_and_emphasis);
+      *current_node = strong_and_emphasis;
+    }
+
+  *reading_ptr += 5;
+
+  return err;
+}
+
+/*
+ * Build a representation of the document, so that it's
+ * then easier to serialize.
+ *
+ * The result is stored in `root`. You should provide
+ * the memory for it, and clean its content with `free_node()`.
+ */
+static int
+build_representation (const char *filename, node_t *root)
+{
+  int err = 0;
+  char content[MAX_FILE_SIZE] = {0};
   FILE *file = NULL;
 
   file = fopen (filename, "r");
   if (!file)
     {
-      fprintf (stderr, "convert() : can't open file.\n");
+      fprintf (stderr, "build_representation() : can't read file %s\n", filename);
       goto cleanup;
     }
 
-  bool first_line = true;
-  bool last_line = false;
-  char line[MAX_LINE_LENGTH] = {0};
-  char next_line[MAX_LINE_LENGTH] = {0};
-  parser_memory_t parser_memory = {0};
+  size_t content_len = fread (content, 1, MAX_FILE_SIZE - 1, file);
+  if (content_len == MAX_FILE_SIZE - 1)
+    fprintf (stderr, "build_representation() : warning : input file has probably been truncated due to its size.\n");
 
-  while (1)
+  node_t *current_node = xalloc (sizeof *current_node);
+  current_node->type = NODE_PARAGRAPH;
+  append_child (root, current_node);
+  char *reading_ptr = content;
+  char buffer[BUFSIZ] = {0};
+  char *buffer_ptr = buffer;
+
+  while (true)
     {
-      if (last_line)
-        break;
-
-      if (first_line)
+      err = parse_paragraph_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
+      if (err)
         {
-          if (!fgets (line, MAX_LINE_LENGTH - 1, file))
-            break;
-          first_line = false;
+          fprintf (stderr, "build_representation() : error while parsing paragraph end.\n");
+          return err;
         }
-      else
-        {
-          if (snprintf (line, MAX_LINE_LENGTH - 1, "%s", next_line) > MAX_LINE_LENGTH - 1)
-            fprintf (stderr, "convert() : warning : last character of next line truncated.\n");
 
-          if (!fgets (next_line, MAX_LINE_LENGTH - 1, file))
+      err = parse_strong_and_emphasis (&current_node, &reading_ptr, buffer, &buffer_ptr);
+      if (err)
+        {
+          fprintf (stderr, "build_representation() : error while parsing strong and emphasis.\n");
+          return err;
+        }
+
+      if (buffer_ptr - buffer == BUFSIZ - 1)
+        {
+          err = flush_text_buffer (current_node, buffer, &buffer_ptr);
+          if (err)
             {
-              last_line = true;
-              next_line[0] = 0;
+              fprintf (stderr, "build_representation() : error while append flushing text buffer.\n");
+              return err;
             }
         }
 
-      parse_bullet_list (line);
-      parse_numbered_list (line);
-      parse_heading (line, &parser_memory);
-      parse_horizontal_rule (line, &parser_memory);
-      parse_inline_tag (line, "'''''", "'''''", "**_", "_**");
-      parse_inline_tag (line, "'''", "'''", "**", "**");
-      parse_inline_tag (line, "''", "''", "_", "_");
+      buffer_ptr[0] = reading_ptr[0];
+      buffer_ptr[1] = 0;
+      buffer_ptr++;
+      reading_ptr++;
 
-      if (parser_memory.needs_empty_lines && !parser_memory.last_line_was_blank)
-        puts ("");
-
-      printf ("%s", line);
-
-      bool was_blank = true;
-      for (size_t i = 0; i < strlen (line); i++)
-        if (!isspace (line[i]))
-          was_blank = false;
-      parser_memory.last_line_was_blank = was_blank;
-
-      if (parser_memory.needs_empty_lines)
+      if ((size_t) (reading_ptr - content) >= content_len - 1)
         {
-          bool next_line_empty = true;
-          if (strlen (next_line))
-            for (size_t i = 0; i < strlen (next_line); i++)
-              if (!isspace (next_line[i]))
-                {
-                  next_line_empty = false;
-                  break;
-                }
-
-          if (!next_line_empty)
-            puts ("");
-
-          parser_memory.needs_empty_lines = false;
-          parser_memory.last_line_was_blank = true;
+          flush_text_buffer (current_node, buffer, &buffer_ptr);
+          break;
         }
     }
 
@@ -329,10 +287,53 @@ convert (const char *filename)
   return err;
 }
 
+/*
+ * Convert given node to markdown and output it.
+ */
+static int
+dump (node_t *node)
+{
+  int err = 0;
+  switch (node->type)
+    {
+      case NODE_ROOT:
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        break;
+
+      case NODE_TEXT:
+        printf ("%s", node->text_content);
+        break;
+
+      case NODE_PARAGRAPH:
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+
+        puts ("\n");
+        break;
+
+      case NODE_STRONG_AND_EMPHASIS:
+        printf ("**_");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("_**");
+        break;
+
+      default:
+        err = 1;
+        fprintf (stderr, "dump() : unknown node type : %d\n", node->type);
+        goto cleanup;
+    }
+
+  cleanup:
+  return err;
+}
+
 int
 main (int argc, char **argv)
 {
   int err = 0;
+  node_t *root = NULL;
 
   if (argc > 1 && (strncmp (argv[1], "-h", 10) == 0 || strncmp (argv[1], "--help", 10) == 0))
     {
@@ -356,13 +357,23 @@ main (int argc, char **argv)
       goto cleanup;
     }
 
-  err = convert (filename);
+  root = xalloc (sizeof *root);
+  root->type = NODE_ROOT;
+  err = build_representation (filename, root);
   if (err)
     {
-      fprintf (stderr, "main() : error while converting file.\n");
+      fprintf (stderr, "main() : error while building representation of file.\n");
+      goto cleanup;
+    }
+
+  err = dump (root);
+  if (err)
+    {
+      fprintf (stderr, "main() : error while dumping markdown.\n");
       goto cleanup;
     }
 
   cleanup:
+  if (root) free_node (root);
   return err;
 }
