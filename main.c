@@ -50,8 +50,10 @@ enum {
 };
 
 typedef struct _node_t {
-  int type;
+  size_t type;
+  size_t subtype;
   char *text_content;
+  bool is_block_level;
   struct _node_t **children;
   size_t children_len;
   struct _node_t *parent;
@@ -144,35 +146,107 @@ flush_text_buffer (node_t *current_node, char *buffer, char **buffer_ptr)
 }
 
 /*
- * Parse mediawiki paragraph.
- *
- * A paragraph is a block of text ending in "\n\n".
+ * Parse if a mediawiki has started.
  *
  */
 static int
-parse_paragraph_end (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+parse_block_start (node_t **current_node, char **reading_ptr)
 {
   int err = 0;
 
-  if (strncmp (*reading_ptr, "\n\n", 2) != 0)
+  if ((*current_node)->type != NODE_ROOT)
     return err;
+
+  node_t *new_node = NULL;
+
+  if (strlen (*reading_ptr) > 1)
+    {
+      new_node = xalloc (sizeof *new_node);
+
+      if (strncmp (*reading_ptr, "==", 2) == 0)
+        {
+          new_node->type = NODE_HEADING;
+          new_node->subtype = 1;
+          *reading_ptr += 2;
+          while (*reading_ptr[0] == '=' && new_node->subtype < 6)
+            {
+              (*reading_ptr)++;
+              new_node->subtype++;
+            }
+        }
+      else
+        new_node->type = NODE_PARAGRAPH;
+
+      new_node->is_block_level = true;
+      append_child (*current_node, new_node);
+    }
+
+  *current_node = new_node;
+
+  return err;
+}
+
+/*
+ * Parse if a mediawiki has ended.
+ *
+ */
+static int
+parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+{
+  int err = 0;
+
+  if ((*current_node)->type == NODE_ROOT)
+    return 0;
+
+  node_t *block = *current_node;
+  while (block && !block->is_block_level)
+    block = block->parent;
+
+  if (!block)
+    {
+      fprintf (stderr, "parse_block_end() : apparently, there is no block level element. This is very wrong. Did someone divide by zero?\n");
+      return 1;
+    }
+    
+  switch (block->type)
+    {
+      case NODE_PARAGRAPH:
+        if (strncmp (*reading_ptr, "\n\n", 2) != 0)
+          return 0;
+
+        *reading_ptr += 2;
+        break;
+
+      case NODE_HEADING:;
+        char closing_tag[10] = {0};
+        for (size_t i = 0; i < block->subtype && i < 6; i++)
+          closing_tag[i] = '=';
+        closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
+
+        if (strncmp (*reading_ptr, closing_tag, strlen (closing_tag)) != 0)
+          return 0;
+
+        while (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
+          (*reading_ptr)++;
+
+        if (*reading_ptr[0] == '\n')
+          (*reading_ptr)++;
+
+        break;
+
+      default:
+        fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
+        return 1;
+    }
 
   err = flush_text_buffer (*current_node, buffer, buffer_ptr);
   if (err)
     {
-      fprintf (stderr, "parse_strong_and_emphasis() : error while append flushing text buffer.\n");
+      fprintf (stderr, "parse_block_end() : error while append flushing text buffer.\n");
       return err;
     }
 
-  if (strlen (*reading_ptr) > 2)
-    {
-      node_t *new_paragraph = xalloc (sizeof *new_paragraph);
-      new_paragraph->type = NODE_PARAGRAPH;
-      append_child ((*current_node)->parent, new_paragraph);
-      *current_node = new_paragraph;
-    }
-
-  *reading_ptr += 2;
+  *current_node = block->parent;
 
   return err;
 }
@@ -237,20 +311,31 @@ build_representation (const char *filename, node_t *root)
   if (content_len == MAX_FILE_SIZE - 1)
     fprintf (stderr, "build_representation() : warning : input file has probably been truncated due to its size.\n");
 
-  node_t *current_node = xalloc (sizeof *current_node);
-  current_node->type = NODE_PARAGRAPH;
-  append_child (root, current_node);
+  node_t *current_node = root;
   char *reading_ptr = content;
   char buffer[BUFSIZ] = {0};
   char *buffer_ptr = buffer;
 
   while (true)
     {
-      err = parse_paragraph_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
+      err = parse_block_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
       if (err)
         {
-          fprintf (stderr, "build_representation() : error while parsing paragraph end.\n");
+          fprintf (stderr, "build_representation() : error while parsing block end.\n");
           return err;
+        }
+
+      if (current_node->type == NODE_ROOT)
+        {
+          err = parse_block_start (&current_node, &reading_ptr);
+          if (err)
+            {
+              fprintf (stderr, "build_representation() : error while parsing block start.\n");
+              return err;
+            }
+
+          if (!current_node)
+            break;
         }
 
       err = parse_strong_and_emphasis (&current_node, &reading_ptr, buffer, &buffer_ptr);
@@ -312,6 +397,16 @@ dump (node_t *node)
         puts ("\n");
         break;
 
+      case NODE_HEADING:
+        for (size_t i = 0; i < node->subtype; i++)
+          printf ("#");
+
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+
+        puts ("\n");
+        break;
+
       case NODE_STRONG_AND_EMPHASIS:
         printf ("**_");
         for (size_t i = 0; i < node->children_len; i++)
@@ -321,7 +416,7 @@ dump (node_t *node)
 
       default:
         err = 1;
-        fprintf (stderr, "dump() : unknown node type : %d\n", node->type);
+        fprintf (stderr, "dump() : unknown node type : %ld\n", node->type);
         goto cleanup;
     }
 
