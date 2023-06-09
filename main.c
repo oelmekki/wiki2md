@@ -183,6 +183,12 @@ parse_block_start (node_t **current_node, char **reading_ptr)
           new_node->type = NODE_BLOCKLEVEL_TEMPLATE;
           *reading_ptr += 2;
         }
+      // NODE_HORIZONTAL_RULE
+      else if (strncmp (*reading_ptr, "----", 4) == 0)
+        {
+          new_node->type = NODE_HORIZONTAL_RULE;
+          *reading_ptr += 4;
+        }
       else
         new_node->type = NODE_PARAGRAPH;
 
@@ -220,7 +226,7 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
   switch (block->type)
     {
       case NODE_PARAGRAPH:
-        if (strncmp (*reading_ptr, "\n\n", 2) != 0)
+        if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
           return 0;
 
         break;
@@ -246,6 +252,11 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
         if (strncmp (*reading_ptr, "}}", 2) != 0 || ((*current_node)->type == NODE_INLINE_TEMPLATE))
           return 0;
         *reading_ptr += 2;
+        break;
+
+      case NODE_HORIZONTAL_RULE:
+        if (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
+          return 0;
         break;
 
       default:
@@ -278,46 +289,57 @@ parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, cha
 
   while (true)
     {
+      bool current_node_is_emphasis = (*current_node)->type == NODE_STRONG_AND_EMPHASIS || (*current_node)->type == NODE_STRONG || (*current_node)->type == NODE_EMPHASIS;
+      bool tag_matched = false;
+      node_t *new_node = NULL;
+
       if (strlen (*reading_ptr) > 1)
         {
           // NODE_STRONG_AND_EMPHASIS
-          if (strncmp (*reading_ptr, "'''''", 5) == 0 && (*current_node)->type != NODE_STRONG_AND_EMPHASIS)
+          if (strncmp (*reading_ptr, "'''''", 5) == 0 && !current_node_is_emphasis)
             {
-              err = flush_text_buffer (*current_node, buffer, buffer_ptr);
-              if (err)
-                {
-                  fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
-                  return err;
-                }
-
-              node_t *strong_and_emphasis = xalloc (sizeof *strong_and_emphasis);
-              strong_and_emphasis->type = NODE_STRONG_AND_EMPHASIS;
-              append_child (*current_node, strong_and_emphasis);
-              *current_node = strong_and_emphasis;
-
+              tag_matched = true;
+              new_node = xalloc (sizeof *new_node);
+              new_node->type = NODE_STRONG_AND_EMPHASIS;
               *reading_ptr += 5;
-              continue;
             }
-
-          // NODE_INLINE_TEMPLATE
-          if (strncmp (*reading_ptr, "{{", 2) == 0) // if we reach this point, it's not a block level template.
+          // NODE_STRONG
+          else if (strncmp (*reading_ptr, "'''", 3) == 0 && !current_node_is_emphasis)
             {
-              err = flush_text_buffer (*current_node, buffer, buffer_ptr);
-              if (err)
-                {
-                  fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
-                  return err;
-                }
-
-              node_t *template = xalloc (sizeof *template);
-              template->type = NODE_INLINE_TEMPLATE;
-              append_child (*current_node, template);
-              *current_node = template;
-
-              *reading_ptr += 2;
-              continue;
+              tag_matched = true;
+              new_node = xalloc (sizeof *new_node);
+              new_node->type = NODE_STRONG;
+              *reading_ptr += 3;
             }
-          break;
+          // NODE_EMPHASIS
+          else if (strncmp (*reading_ptr, "''", 2) == 0 && !current_node_is_emphasis)
+            {
+              tag_matched = true;
+              new_node = xalloc (sizeof *new_node);
+              new_node->type = NODE_EMPHASIS;
+              *reading_ptr += 2;
+            }
+          // NODE_INLINE_TEMPLATE
+          else if (strncmp (*reading_ptr, "{{", 2) == 0) // if we reach this point, it's not a block level template.
+            {
+              tag_matched = true;
+              new_node = xalloc (sizeof *new_node);
+              new_node->type = NODE_INLINE_TEMPLATE;
+              *reading_ptr += 2;
+            }
+
+          if (!tag_matched)
+            break;
+
+          err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+          if (err)
+            {
+              fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
+              return err;
+            }
+
+          append_child (*current_node, new_node);
+          *current_node = new_node;
         }
     }
 
@@ -341,6 +363,20 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
               return 0;
 
             *reading_ptr += 5;
+            break;
+
+          case NODE_STRONG:
+            if (strncmp (*reading_ptr, "'''", 3) != 0)
+              return 0;
+
+            *reading_ptr += 3;
+            break;
+
+          case NODE_EMPHASIS:
+            if (strncmp (*reading_ptr, "''", 2) != 0)
+              return 0;
+
+            *reading_ptr += 2;
             break;
 
           case NODE_INLINE_TEMPLATE:
@@ -407,6 +443,7 @@ build_representation (const char *filename, node_t *root)
 
       if (current_node->type == NODE_ROOT)
         {
+          node_t *initial_node = current_node;
           err = parse_block_start (&current_node, &reading_ptr);
           if (err)
             {
@@ -416,6 +453,9 @@ build_representation (const char *filename, node_t *root)
 
           if (!current_node)
             break;
+
+          if (current_node != initial_node)
+            continue;
         }
 
       err = parse_inline_start (&current_node, &reading_ptr, buffer, &buffer_ptr);
@@ -504,6 +544,10 @@ dump (node_t *node)
         printf ("</pre>\n\n");
         break;
 
+      case NODE_HORIZONTAL_RULE:
+        printf ("--\n\n");
+        break;
+
       case NODE_INLINE_TEMPLATE:
         printf ("<code>");
         for (size_t i = 0; i < node->children_len; i++)
@@ -516,6 +560,20 @@ dump (node_t *node)
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
         printf ("_**");
+        break;
+
+      case NODE_STRONG:
+        printf ("**");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("**");
+        break;
+
+      case NODE_EMPHASIS:
+        printf ("_");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("_");
         break;
 
       default:
