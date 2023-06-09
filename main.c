@@ -498,10 +498,10 @@ dump (node_t *node)
         break;
 
       case NODE_BLOCKLEVEL_TEMPLATE:
-        printf ("<code>");
+        printf ("<pre>");
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
-        printf ("</code>\n\n");
+        printf ("</pre>\n\n");
         break;
 
       case NODE_INLINE_TEMPLATE:
