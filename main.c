@@ -30,6 +30,7 @@ enum {
   NODE_TEXT,
   NODE_PARAGRAPH,
   NODE_HEADING,
+  NODE_BLOCKLEVEL_TEMPLATE,
   NODE_STRONG,
   NODE_EMPHASIS,
   NODE_STRONG_AND_EMPHASIS,
@@ -38,6 +39,7 @@ enum {
   NODE_NUMBERED_LIST,
   NODE_NUMBERED_LIST_ITEM,
   NODE_HORIZONTAL_RULE,
+  NODE_INLINE_TEMPLATE,
   NODE_NOWIKI,
   NODE_DEFINITION_LIST,
   NODE_DEFINITION_LIST_TERM,
@@ -163,6 +165,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
     {
       new_node = xalloc (sizeof *new_node);
 
+      // NODE_HEADING
       if (strncmp (*reading_ptr, "==", 2) == 0)
         {
           new_node->type = NODE_HEADING;
@@ -173,6 +176,12 @@ parse_block_start (node_t **current_node, char **reading_ptr)
               (*reading_ptr)++;
               new_node->subtype++;
             }
+        }
+      // NODE_BLOCKLEVEL_TEMPLATE
+      else if (strncmp (*reading_ptr, "{{", 2) == 0)
+        {
+          new_node->type = NODE_BLOCKLEVEL_TEMPLATE;
+          *reading_ptr += 2;
         }
       else
         new_node->type = NODE_PARAGRAPH;
@@ -214,7 +223,6 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
         if (strncmp (*reading_ptr, "\n\n", 2) != 0)
           return 0;
 
-        *reading_ptr += 2;
         break;
 
       case NODE_HEADING:;
@@ -234,10 +242,19 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
 
         break;
 
+      case NODE_BLOCKLEVEL_TEMPLATE:
+        if (strncmp (*reading_ptr, "}}", 2) != 0 || ((*current_node)->type == NODE_INLINE_TEMPLATE))
+          return 0;
+        *reading_ptr += 2;
+        break;
+
       default:
         fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
         return 1;
     }
+
+  while (*reading_ptr[0] == '\n')
+    (*reading_ptr)++;
 
   err = flush_text_buffer (*current_node, buffer, buffer_ptr);
   if (err)
@@ -252,36 +269,99 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
 }
 
 /*
- * Parse mediawiki tag adding both strong and emphasis :
- *
- *    '''''content'''''
+ * Parse mediawiki inline tags opening.
  */
 static int
-parse_strong_and_emphasis (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
 {
   int err = 0;
 
-  if (strncmp (*reading_ptr, "'''''", 5) != 0)
-    return err;
-
-  err = flush_text_buffer (*current_node, buffer, buffer_ptr);
-  if (err)
+  while (true)
     {
-      fprintf (stderr, "parse_strong_and_emphasis() : error while append flushing text buffer.\n");
-      return err;
+      if (strlen (*reading_ptr) > 1)
+        {
+          // NODE_STRONG_AND_EMPHASIS
+          if (strncmp (*reading_ptr, "'''''", 5) == 0 && (*current_node)->type != NODE_STRONG_AND_EMPHASIS)
+            {
+              err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+              if (err)
+                {
+                  fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
+                  return err;
+                }
+
+              node_t *strong_and_emphasis = xalloc (sizeof *strong_and_emphasis);
+              strong_and_emphasis->type = NODE_STRONG_AND_EMPHASIS;
+              append_child (*current_node, strong_and_emphasis);
+              *current_node = strong_and_emphasis;
+
+              *reading_ptr += 5;
+              continue;
+            }
+
+          // NODE_INLINE_TEMPLATE
+          if (strncmp (*reading_ptr, "{{", 2) == 0) // if we reach this point, it's not a block level template.
+            {
+              err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+              if (err)
+                {
+                  fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
+                  return err;
+                }
+
+              node_t *template = xalloc (sizeof *template);
+              template->type = NODE_INLINE_TEMPLATE;
+              append_child (*current_node, template);
+              *current_node = template;
+
+              *reading_ptr += 2;
+              continue;
+            }
+          break;
+        }
     }
 
-  if ((*current_node)->type == NODE_STRONG_AND_EMPHASIS)
-    *current_node = (*current_node)->parent;
-  else
-    {
-      node_t *strong_and_emphasis = xalloc (sizeof *strong_and_emphasis);
-      strong_and_emphasis->type = NODE_STRONG_AND_EMPHASIS;
-      append_child (*current_node, strong_and_emphasis);
-      *current_node = strong_and_emphasis;
-    }
+  return err;
+}
 
-  *reading_ptr += 5;
+/*
+ * Parse mediawiki inline tags closing.
+ */
+static int
+parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char **buffer_ptr)
+{
+  int err = 0;
+
+  if (strlen (*reading_ptr) > 1)
+    {
+      switch ((*current_node)->type)
+        {
+          case NODE_STRONG_AND_EMPHASIS:
+            if (strncmp (*reading_ptr, "'''''", 5) != 0)
+              return 0;
+
+            *reading_ptr += 5;
+            break;
+
+          case NODE_INLINE_TEMPLATE:
+            if (strncmp (*reading_ptr, "}}", 2) != 0)
+              return 0;
+
+            *reading_ptr += 2;
+            break;
+
+          default:
+            return 0;
+        }
+
+      err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+      if (err)
+        {
+          fprintf (stderr, "parse_inline_start() : error while flushing text buffer.\n");
+          return err;
+        }
+      *current_node = (*current_node)->parent;
+    }
 
   return err;
 }
@@ -338,10 +418,17 @@ build_representation (const char *filename, node_t *root)
             break;
         }
 
-      err = parse_strong_and_emphasis (&current_node, &reading_ptr, buffer, &buffer_ptr);
+      err = parse_inline_start (&current_node, &reading_ptr, buffer, &buffer_ptr);
       if (err)
         {
-          fprintf (stderr, "build_representation() : error while parsing strong and emphasis.\n");
+          fprintf (stderr, "build_representation() : error while parsing for inline tag start.\n");
+          return err;
+        }
+
+      err = parse_inline_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
+      if (err)
+        {
+          fprintf (stderr, "build_representation() : error while parsing for inline tag end.\n");
           return err;
         }
 
@@ -405,6 +492,20 @@ dump (node_t *node)
           dump (node->children[i]);
 
         puts ("\n");
+        break;
+
+      case NODE_BLOCKLEVEL_TEMPLATE:
+        printf ("<code>");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("</code>\n\n");
+        break;
+
+      case NODE_INLINE_TEMPLATE:
+        printf ("<code>");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("</code>");
         break;
 
       case NODE_STRONG_AND_EMPHASIS:
