@@ -488,6 +488,9 @@ dump (node_t *node)
         for (size_t i = 0; i < node->subtype; i++)
           printf ("#");
 
+        if (!node->children_len || node->children[0]->type != NODE_TEXT || !node->children[0]->text_content || !isspace (node->children[0]->text_content[0]))
+          printf (" ");
+
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
 
