@@ -44,7 +44,6 @@ enum {
   NODE_DEFINITION_LIST,
   NODE_DEFINITION_LIST_TERM,
   NODE_DEFINITION_LIST_DEFINITION,
-  NODE_INDENT,
   NODE_PREFORMATTED_TEXT,
   NODE_PREFORMATTED_CODE_BLOCK,
   NODE_LINK,
@@ -160,87 +159,115 @@ parse_block_start (node_t **current_node, char **reading_ptr)
   if (!(*current_node)->can_have_block_children)
     return err;
 
+  /*
+   * if there is not at least a markup character and a text character,
+   * this can't be anything we're interested in.
+   */
+  if (strlen (*reading_ptr) < 2)
+    return err;
+
   node_t *new_node = NULL;
+  new_node = xalloc (sizeof *new_node);
+  int new_child_node = 0;
 
-  if (strlen (*reading_ptr) > 1)
+  // NODE_HEADING
+  if (strncmp (*reading_ptr, "==", 2) == 0)
     {
-      new_node = xalloc (sizeof *new_node);
-
-      // NODE_HEADING
-      if (strncmp (*reading_ptr, "==", 2) == 0)
+      new_node->type = NODE_HEADING;
+      new_node->subtype = 1;
+      *reading_ptr += 2;
+      while (*reading_ptr[0] == '=' && new_node->subtype < 6)
         {
-          new_node->type = NODE_HEADING;
-          new_node->subtype = 1;
-          *reading_ptr += 2;
-          while (*reading_ptr[0] == '=' && new_node->subtype < 6)
+          (*reading_ptr)++;
+          new_node->subtype++;
+        }
+    }
+  // NODE_BLOCKLEVEL_TEMPLATE
+  else if (strncmp (*reading_ptr, "{{", 2) == 0)
+    {
+      new_node->type = NODE_BLOCKLEVEL_TEMPLATE;
+      *reading_ptr += 2;
+    }
+  // NODE_HORIZONTAL_RULE
+  else if (strncmp (*reading_ptr, "----", 4) == 0)
+    {
+      new_node->type = NODE_HORIZONTAL_RULE;
+      *reading_ptr += 4;
+    }
+  // NODE_BULLET_LIST and NODE_BULLET_LIST_ITEM
+  else if (strncmp (*reading_ptr, "*", 1) == 0)
+    {
+      if ((*current_node)->type == NODE_BULLET_LIST)
+        {
+          new_node->type = NODE_BULLET_LIST_ITEM;
+          new_node->subtype = 0;
+          while (*reading_ptr[0] == '*')
             {
               (*reading_ptr)++;
               new_node->subtype++;
             }
         }
-      // NODE_BLOCKLEVEL_TEMPLATE
-      else if (strncmp (*reading_ptr, "{{", 2) == 0)
+      else
         {
-          new_node->type = NODE_BLOCKLEVEL_TEMPLATE;
-          *reading_ptr += 2;
+          new_node->type = NODE_BULLET_LIST;
+          new_node->can_have_block_children = true;
+          new_child_node = NODE_BULLET_LIST_ITEM;
         }
-      // NODE_HORIZONTAL_RULE
-      else if (strncmp (*reading_ptr, "----", 4) == 0)
+    }
+  // NODE_NUMBERED_LIST and NODE_NUMBERED_LIST_ITEM
+  else if (strncmp (*reading_ptr, "#", 1) == 0)
+    {
+      if ((*current_node)->type == NODE_NUMBERED_LIST)
         {
-          new_node->type = NODE_HORIZONTAL_RULE;
-          *reading_ptr += 4;
-        }
-      // NODE_BULLET_LIST and NODE_BULLET_LIST_ITEM
-      else if (strncmp (*reading_ptr, "*", 1) == 0)
-        {
-          if ((*current_node)->type == NODE_BULLET_LIST)
+          new_node->type = NODE_NUMBERED_LIST_ITEM;
+          new_node->subtype = 0;
+          while (*reading_ptr[0] == '#')
             {
-              new_node->type = NODE_BULLET_LIST_ITEM;
-              new_node->subtype = 0;
-              while (*reading_ptr[0] == '*')
-                {
-                  (*reading_ptr)++;
-                  new_node->subtype++;
-                }
-            }
-          else
-            {
-              new_node->type = NODE_BULLET_LIST;
-              new_node->can_have_block_children = true;
-            }
-        }
-      // NODE_NUMBERED_LIST and NODE_NUMBERED_LIST_ITEM
-      else if (strncmp (*reading_ptr, "#", 1) == 0)
-        {
-          if ((*current_node)->type == NODE_NUMBERED_LIST)
-            {
-              new_node->type = NODE_NUMBERED_LIST_ITEM;
-              new_node->subtype = 0;
-              while (*reading_ptr[0] == '#')
-                {
-                  (*reading_ptr)++;
-                  new_node->subtype++;
-                }
-            }
-          else
-            {
-              new_node->type = NODE_NUMBERED_LIST;
-              new_node->can_have_block_children = true;
+              (*reading_ptr)++;
+              new_node->subtype++;
             }
         }
       else
-        new_node->type = NODE_PARAGRAPH;
-
-      new_node->is_block_level = true;
-      append_child (*current_node, new_node);
+        {
+          new_node->type = NODE_NUMBERED_LIST;
+          new_node->can_have_block_children = true;
+          new_child_node = NODE_NUMBERED_LIST_ITEM;
+        }
     }
+  // NODE_DEFINITION_LIST and NODE_DEFINITION_LIST_TERM
+  else if (strncmp (*reading_ptr, ";", 1) == 0)
+    {
+      new_node->type = NODE_DEFINITION_LIST;
+      new_node->can_have_block_children = true;
+      new_child_node = NODE_DEFINITION_LIST_TERM;
+    }
+  // NODE_DEFINITION_LIST and NODE_DEFINITION_LIST_DEFINITION
+  else if (strncmp (*reading_ptr, ":", 1) == 0)
+    {
+      if ((*current_node)->type == NODE_DEFINITION_LIST)
+        {
+          new_node->type = NODE_DEFINITION_LIST_DEFINITION;
+          (*reading_ptr)++;
+        }
+      else
+        {
+          new_node->type = NODE_DEFINITION_LIST;
+          new_node->can_have_block_children = true;
+          new_child_node = NODE_DEFINITION_LIST_DEFINITION;
+        }
+    }
+  else
+    new_node->type = NODE_PARAGRAPH;
+
+  new_node->is_block_level = true;
+  append_child (*current_node, new_node);
 
   *current_node = new_node;
 
-  if (new_node->type == NODE_BULLET_LIST || new_node->type == NODE_NUMBERED_LIST)
+  if (new_child_node)
     {
       node_t *list_item = xalloc (sizeof *list_item);
-      list_item->type = new_node->type == NODE_BULLET_LIST ? NODE_BULLET_LIST_ITEM : NODE_NUMBERED_LIST_ITEM;
+      list_item->type = new_child_node;
       list_item->subtype = 1;
       list_item->is_block_level = true;
       append_child (new_node, list_item);
@@ -342,6 +369,37 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
               bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
               bool is_end_of_item = strncmp (*reading_ptr, "\n#", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
               if (!is_end_of_list && !is_end_of_item)
+                return 0;
+
+              if (is_end_of_list)
+                close_parent_too = true;
+
+              break;
+            }
+
+          case NODE_DEFINITION_LIST:
+            if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
+              return 0;
+            break;
+
+          case NODE_DEFINITION_LIST_TERM:
+            {
+              bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              bool is_end_of_term = strncmp (*reading_ptr, "\n:", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              if (!is_end_of_list && !is_end_of_term)
+                return 0;
+
+              if (is_end_of_list)
+                close_parent_too = true;
+
+              break;
+            }
+
+          case NODE_DEFINITION_LIST_DEFINITION:
+            {
+              bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              bool is_end_of_definition = strncmp (*reading_ptr, "\n:", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              if (!is_end_of_list && !is_end_of_definition)
                 return 0;
 
               if (is_end_of_list)
@@ -672,6 +730,27 @@ dump (node_t *node)
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
         printf ("\n");
+        break;
+
+      case NODE_DEFINITION_LIST:
+        printf ("<dl>\n");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("</dl>\n");
+        break;
+
+      case NODE_DEFINITION_LIST_TERM:
+        printf ("<dt>");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("</dt>\n");
+        break;
+
+      case NODE_DEFINITION_LIST_DEFINITION:
+        printf ("<dd>");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("</dd>\n");
         break;
 
       case NODE_INLINE_TEMPLATE:
