@@ -209,6 +209,25 @@ parse_block_start (node_t **current_node, char **reading_ptr)
               new_node->can_have_block_children = true;
             }
         }
+      // NODE_NUMBERED_LIST and NODE_NUMBERED_LIST_ITEM
+      else if (strncmp (*reading_ptr, "#", 1) == 0)
+        {
+          if ((*current_node)->type == NODE_NUMBERED_LIST)
+            {
+              new_node->type = NODE_NUMBERED_LIST_ITEM;
+              new_node->subtype = 0;
+              while (*reading_ptr[0] == '#')
+                {
+                  (*reading_ptr)++;
+                  new_node->subtype++;
+                }
+            }
+          else
+            {
+              new_node->type = NODE_NUMBERED_LIST;
+              new_node->can_have_block_children = true;
+            }
+        }
       else
         new_node->type = NODE_PARAGRAPH;
 
@@ -218,10 +237,10 @@ parse_block_start (node_t **current_node, char **reading_ptr)
 
   *current_node = new_node;
 
-  if (new_node->type == NODE_BULLET_LIST)
+  if (new_node->type == NODE_BULLET_LIST || new_node->type == NODE_NUMBERED_LIST)
     {
       node_t *list_item = xalloc (sizeof *list_item);
-      list_item->type = NODE_BULLET_LIST_ITEM;
+      list_item->type = new_node->type == NODE_BULLET_LIST ? NODE_BULLET_LIST_ITEM : NODE_NUMBERED_LIST_ITEM;
       list_item->subtype = 1;
       list_item->is_block_level = true;
       append_child (new_node, list_item);
@@ -265,22 +284,24 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
 
             break;
 
-          case NODE_HEADING:;
-            char closing_tag[10] = {0};
-            for (size_t i = 0; i < block->subtype && i < 6; i++)
-              closing_tag[i] = '=';
-            closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
+          case NODE_HEADING:
+            {
+              char closing_tag[10] = {0};
+              for (size_t i = 0; i < block->subtype && i < 6; i++)
+                closing_tag[i] = '=';
+              closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
 
-            if (strncmp (*reading_ptr, closing_tag, strlen (closing_tag)) != 0)
-              return 0;
+              if (strncmp (*reading_ptr, closing_tag, strlen (closing_tag)) != 0)
+                return 0;
 
-            while (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
-              (*reading_ptr)++;
+              while (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
+                (*reading_ptr)++;
 
-            if (*reading_ptr[0] == '\n')
-              (*reading_ptr)++;
+              if (*reading_ptr[0] == '\n')
+                (*reading_ptr)++;
 
-            break;
+              break;
+            }
 
           case NODE_BLOCKLEVEL_TEMPLATE:
             if (strncmp (*reading_ptr, "}}", 2) != 0 || ((*current_node)->type == NODE_INLINE_TEMPLATE))
@@ -299,15 +320,35 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
             break;
 
           case NODE_BULLET_LIST_ITEM:
-            bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
-            bool is_end_of_item = strncmp (*reading_ptr, "\n*", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
-            if (!is_end_of_list && !is_end_of_item)
+            {
+              bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              bool is_end_of_item = strncmp (*reading_ptr, "\n*", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              if (!is_end_of_list && !is_end_of_item)
+                return 0;
+
+              if (is_end_of_list)
+                close_parent_too = true;
+
+              break;
+            }
+
+          case NODE_NUMBERED_LIST:
+            if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
               return 0;
-
-            if (is_end_of_list)
-              close_parent_too = true;
-
             break;
+
+          case NODE_NUMBERED_LIST_ITEM:
+            {
+              bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              bool is_end_of_item = strncmp (*reading_ptr, "\n#", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+              if (!is_end_of_list && !is_end_of_item)
+                return 0;
+
+              if (is_end_of_list)
+                close_parent_too = true;
+
+              break;
+            }
 
           default:
             fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
@@ -612,6 +653,22 @@ dump (node_t *node)
         for (size_t i = 0; i < node->subtype - 1; i++)
           printf ("  ");
         printf ("*");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("\n");
+        break;
+
+      case NODE_NUMBERED_LIST:
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+
+        printf ("\n");
+        break;
+
+      case NODE_NUMBERED_LIST_ITEM:
+        for (size_t i = 0; i < node->subtype - 1; i++)
+          printf ("  ");
+        printf ("#");
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
         printf ("\n");
