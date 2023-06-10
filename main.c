@@ -56,6 +56,7 @@ typedef struct _node_t {
   size_t subtype;
   char *text_content;
   bool is_block_level;
+  bool can_have_block_children;
   struct _node_t **children;
   size_t children_len;
   struct _node_t *parent;
@@ -156,7 +157,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
 {
   int err = 0;
 
-  if ((*current_node)->type != NODE_ROOT)
+  if (!(*current_node)->can_have_block_children)
     return err;
 
   node_t *new_node = NULL;
@@ -189,6 +190,25 @@ parse_block_start (node_t **current_node, char **reading_ptr)
           new_node->type = NODE_HORIZONTAL_RULE;
           *reading_ptr += 4;
         }
+      // NODE_BULLET_LIST and NODE_BULLET_LIST_ITEM
+      else if (strncmp (*reading_ptr, "*", 1) == 0)
+        {
+          if ((*current_node)->type == NODE_BULLET_LIST)
+            {
+              new_node->type = NODE_BULLET_LIST_ITEM;
+              new_node->subtype = 0;
+              while (*reading_ptr[0] == '*')
+                {
+                  (*reading_ptr)++;
+                  new_node->subtype++;
+                }
+            }
+          else
+            {
+              new_node->type = NODE_BULLET_LIST;
+              new_node->can_have_block_children = true;
+            }
+        }
       else
         new_node->type = NODE_PARAGRAPH;
 
@@ -197,6 +217,17 @@ parse_block_start (node_t **current_node, char **reading_ptr)
     }
 
   *current_node = new_node;
+
+  if (new_node->type == NODE_BULLET_LIST)
+    {
+      node_t *list_item = xalloc (sizeof *list_item);
+      list_item->type = NODE_BULLET_LIST_ITEM;
+      list_item->subtype = 1;
+      list_item->is_block_level = true;
+      append_child (new_node, list_item);
+      *current_node = list_item;
+      (*reading_ptr)++;
+    }
 
   return err;
 }
@@ -210,71 +241,93 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
 {
   int err = 0;
 
-  if ((*current_node)->type == NODE_ROOT)
-    return 0;
-
-  node_t *block = *current_node;
-  while (block && !block->is_block_level)
-    block = block->parent;
-
-  if (!block)
+  while (true)
     {
-      fprintf (stderr, "parse_block_end() : apparently, there is no block level element. This is very wrong. Did someone divide by zero?\n");
-      return 1;
+      if ((*current_node)->type == NODE_ROOT)
+        return 0;
+
+      node_t *block = *current_node;
+      bool close_parent_too = false;
+      while (block && !block->is_block_level)
+        block = block->parent;
+
+      if (!block)
+        {
+          fprintf (stderr, "parse_block_end() : apparently, there is no block level element. This is very wrong. Did someone divide by zero?\n");
+          return 1;
+        }
+
+      switch (block->type)
+        {
+          case NODE_PARAGRAPH:
+            if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
+              return 0;
+
+            break;
+
+          case NODE_HEADING:;
+            char closing_tag[10] = {0};
+            for (size_t i = 0; i < block->subtype && i < 6; i++)
+              closing_tag[i] = '=';
+            closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
+
+            if (strncmp (*reading_ptr, closing_tag, strlen (closing_tag)) != 0)
+              return 0;
+
+            while (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
+              (*reading_ptr)++;
+
+            if (*reading_ptr[0] == '\n')
+              (*reading_ptr)++;
+
+            break;
+
+          case NODE_BLOCKLEVEL_TEMPLATE:
+            if (strncmp (*reading_ptr, "}}", 2) != 0 || ((*current_node)->type == NODE_INLINE_TEMPLATE))
+              return 0;
+            *reading_ptr += 2;
+            break;
+
+          case NODE_HORIZONTAL_RULE:
+            if (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
+              return 0;
+            break;
+
+          case NODE_BULLET_LIST:
+            if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
+              return 0;
+            break;
+
+          case NODE_BULLET_LIST_ITEM:
+            bool is_end_of_list = strncmp (*reading_ptr, "\n\n", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+            bool is_end_of_item = strncmp (*reading_ptr, "\n*", 2) == 0 || strncmp (*reading_ptr, "\n----", 5) == 0 || strncmp (*reading_ptr, "\n==", 3) == 0;
+            if (!is_end_of_list && !is_end_of_item)
+              return 0;
+
+            if (is_end_of_list)
+              close_parent_too = true;
+
+            break;
+
+          default:
+            fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
+            return 1;
+        }
+
+      while (*reading_ptr[0] == '\n')
+        (*reading_ptr)++;
+
+      err = flush_text_buffer (*current_node, buffer, buffer_ptr);
+      if (err)
+        {
+          fprintf (stderr, "parse_block_end() : error while append flushing text buffer.\n");
+          return err;
+        }
+
+      *current_node = block->parent;
+      if (close_parent_too)
+        *current_node = (*current_node)->parent;
     }
-    
-  switch (block->type)
-    {
-      case NODE_PARAGRAPH:
-        if (strncmp (*reading_ptr, "\n\n", 2) != 0 && strncmp (*reading_ptr, "\n----", 5) != 0 && strncmp (*reading_ptr, "\n==", 3) != 0)
-          return 0;
-
-        break;
-
-      case NODE_HEADING:;
-        char closing_tag[10] = {0};
-        for (size_t i = 0; i < block->subtype && i < 6; i++)
-          closing_tag[i] = '=';
-        closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
-
-        if (strncmp (*reading_ptr, closing_tag, strlen (closing_tag)) != 0)
-          return 0;
-
-        while (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
-          (*reading_ptr)++;
-
-        if (*reading_ptr[0] == '\n')
-          (*reading_ptr)++;
-
-        break;
-
-      case NODE_BLOCKLEVEL_TEMPLATE:
-        if (strncmp (*reading_ptr, "}}", 2) != 0 || ((*current_node)->type == NODE_INLINE_TEMPLATE))
-          return 0;
-        *reading_ptr += 2;
-        break;
-
-      case NODE_HORIZONTAL_RULE:
-        if (*reading_ptr[0] != '\n' && *reading_ptr[0] != 0)
-          return 0;
-        break;
-
-      default:
-        fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
-        return 1;
-    }
-
-  while (*reading_ptr[0] == '\n')
-    (*reading_ptr)++;
-
-  err = flush_text_buffer (*current_node, buffer, buffer_ptr);
-  if (err)
-    {
-      fprintf (stderr, "parse_block_end() : error while append flushing text buffer.\n");
-      return err;
-    }
-
-  *current_node = block->parent;
 
   return err;
 }
@@ -441,7 +494,7 @@ build_representation (const char *filename, node_t *root)
           return err;
         }
 
-      if (current_node->type == NODE_ROOT)
+      if (current_node->can_have_block_children)
         {
           node_t *initial_node = current_node;
           err = parse_block_start (&current_node, &reading_ptr);
@@ -548,6 +601,22 @@ dump (node_t *node)
         printf ("--\n\n");
         break;
 
+      case NODE_BULLET_LIST:
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+
+        printf ("\n");
+        break;
+
+      case NODE_BULLET_LIST_ITEM:
+        for (size_t i = 0; i < node->subtype - 1; i++)
+          printf ("  ");
+        printf ("*");
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i]);
+        printf ("\n");
+        break;
+
       case NODE_INLINE_TEMPLATE:
         printf ("<code>");
         for (size_t i = 0; i < node->children_len; i++)
@@ -616,6 +685,7 @@ main (int argc, char **argv)
 
   root = xalloc (sizeof *root);
   root->type = NODE_ROOT;
+  root->can_have_block_children = true;
   err = build_representation (filename, root);
   if (err)
     {
