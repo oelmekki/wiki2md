@@ -24,6 +24,7 @@ Convert the provided file in mediawiki markup to markdown, printed on stdout. \n
 
 #define MAX_LINE_LENGTH 10000
 #define MAX_FILE_SIZE 500000
+#define MAX_LINK_LENGTH 5000
 
 enum {
   NODE_ROOT,
@@ -45,7 +46,8 @@ enum {
   NODE_DEFINITION_LIST_TERM,
   NODE_DEFINITION_LIST_DEFINITION,
   NODE_PREFORMATTED_TEXT,
-  NODE_LINK,
+  NODE_INTERNAL_LINK,
+  NODE_EXTERNAL_LINK,
   NODE_TABLE,
 };
 
@@ -141,6 +143,7 @@ flush_text_buffer (node_t *current_node, char *buffer, char **buffer_ptr)
       return err;
     }
 
+  memset (buffer, 0, BUFSIZ);
   *buffer_ptr = buffer;
 
   return err;
@@ -490,6 +493,14 @@ parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, cha
           new_node->type = NODE_INLINE_TEMPLATE;
           *reading_ptr += 2;
         }
+      // NODE_INTERNAL_LINK
+      else if (strncmp (*reading_ptr, "[[", 2) == 0)
+        {
+          tag_matched = true;
+          new_node = xalloc (sizeof *new_node);
+          new_node->type = NODE_INTERNAL_LINK;
+          *reading_ptr += 2;
+        }
 
       if (!tag_matched)
         break;
@@ -543,6 +554,13 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
 
           case NODE_INLINE_TEMPLATE:
             if (strncmp (*reading_ptr, "}}", 2) != 0)
+              return 0;
+
+            *reading_ptr += 2;
+            break;
+
+          case NODE_INTERNAL_LINK:
+            if (strncmp (*reading_ptr, "]]", 2) != 0)
               return 0;
 
             *reading_ptr += 2;
@@ -678,151 +696,314 @@ build_representation (const char *filename, node_t *root)
   return err;
 }
 
+static int dump (node_t *node, char **writing_ptr, size_t *max_len);
 /*
- * Convert given node to markdown and output it.
+ * Convert a mediawiki internal link to markdown.
+ *
+ * More parsing is done here to match the various components
+ * of the links.
  */
 static int
-dump (node_t *node)
+dump_internal_link (node_t *node, char **writing_ptr, size_t *max_len)
 {
-  int err = 0;
+  char link_def[MAX_LINK_LENGTH] = {0};
+  char *link_ptr = link_def;
+  size_t link_max_len = MAX_LINK_LENGTH;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      int err = dump (node->children[i], &link_ptr, &link_max_len);
+      if (err)
+        {
+          fprintf (stderr, "dump_internal_link() : error while processing link content.\n");
+          return 1;
+        }
+    }
+
+  if (strlen (link_def) == 0)
+    {
+      fprintf (stderr, "dump_internal_link() : warning : empty link detected.\n");
+      return 1;
+    }
+
+  char *text = strstr (link_def, "|");
+  char url[MAX_LINK_LENGTH] = {0};
+  snprintf (url, (text ? (size_t) (text - link_def) : strlen (link_def)) + 1, "%s", link_def);
+
+  if (text)
+    text++;
+
+  if (!text || !strlen (text))
+    text = url;
+
+  size_t out_len = strlen (text) + strlen (url) + 7;
+  snprintf (*writing_ptr, *max_len, "[%s](%s.md)", text, url);
+  *writing_ptr += out_len;
+  *max_len -= out_len;
+
+  return 0;
+}
+
+/*
+ * Convert given node to markdown and output it.
+ *
+ * The converted content will be dumped into `writing_ptr`, up
+ * to max_len. `writing_ptr` will be advanced to the next position
+ * of available space, and `max_len` will be reduced by the written
+ * content length.
+ */
+static int
+dump (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  if (*max_len < 10)
+    {
+      fprintf (stderr, "dump() : output content too long.\n");
+      return 1;
+    }
+
   switch (node->type)
     {
       case NODE_ROOT:
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
+          dump (node->children[i], writing_ptr, max_len);
         break;
 
       case NODE_TEXT:
-        printf ("%s", node->text_content);
-        break;
+        {
+          size_t len = strlen (node->text_content);
+          if (*max_len < len)
+            {
+              fprintf (stderr, "dump() : output content too long.\n");
+              return 1;
+            }
+
+          snprintf (*writing_ptr, *max_len, "%s", node->text_content);
+          *writing_ptr += len;
+          *max_len -= len;
+          break;
+        }
 
       case NODE_PARAGRAPH:
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
+          dump (node->children[i], writing_ptr, max_len);
 
-        puts ("\n");
+        snprintf (*writing_ptr, *max_len, "\n\n");
+        *writing_ptr += 2;
+        *max_len -= 2;
         break;
 
       case NODE_HEADING:
         for (size_t i = 0; i < node->subtype; i++)
-          printf ("#");
+          {
+            snprintf (*writing_ptr, *max_len, "#");
+            (*writing_ptr)++;
+            (*max_len)--;
+          }
 
         if (!node->children_len || node->children[0]->type != NODE_TEXT || !node->children[0]->text_content || !isspace (node->children[0]->text_content[0]))
-          printf (" ");
+          {
+            snprintf (*writing_ptr, *max_len, " ");
+            (*writing_ptr)++;
+            (*max_len)--;
+          }
 
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
+          dump (node->children[i], writing_ptr, max_len);
 
-        puts ("\n");
+        snprintf (*writing_ptr, *max_len, "\n\n");
+        *writing_ptr += 2;
+        *max_len -= 2;
         break;
 
       case NODE_BLOCKLEVEL_TEMPLATE:
-        printf ("<pre>");
+        snprintf (*writing_ptr, *max_len, "<pre>{{");
+        *writing_ptr += 7;
+        *max_len -= 7;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</pre>\n\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "}}<pre>\n\n");
+        *writing_ptr += 9;
+        *max_len -= 9;
         break;
 
       case NODE_HORIZONTAL_RULE:
-        printf ("--\n\n");
+        snprintf (*writing_ptr, *max_len, "--\n\n");
+        *writing_ptr += 4;
+        *max_len -= 4;
         break;
 
       case NODE_BULLET_LIST:
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
+          dump (node->children[i], writing_ptr, max_len);
 
         printf ("\n");
         break;
 
       case NODE_BULLET_LIST_ITEM:
         for (size_t i = 0; i < node->subtype - 1; i++)
-          printf ("  ");
-        printf ("*");
+          {
+            snprintf (*writing_ptr, *max_len, "  ");
+            *writing_ptr += 2;
+            *max_len -= 2;
+          }
+
+        snprintf (*writing_ptr, *max_len, "*");
+        (*writing_ptr)++;
+        (*max_len)--;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
         break;
 
       case NODE_NUMBERED_LIST:
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
+          dump (node->children[i], writing_ptr, max_len);
 
-        printf ("\n");
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
         break;
 
       case NODE_NUMBERED_LIST_ITEM:
         for (size_t i = 0; i < node->subtype - 1; i++)
-          printf ("  ");
-        printf ("#");
+          {
+            snprintf (*writing_ptr, *max_len, "  ");
+            *writing_ptr += 2;
+            *max_len -= 2;
+          }
+
+        snprintf (*writing_ptr, *max_len, "#");
+        (*writing_ptr)++;
+        (*max_len)--;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
         break;
 
       case NODE_DEFINITION_LIST:
-        printf ("<dl>\n");
+        snprintf (*writing_ptr, *max_len, "<dl>\n");
+        *writing_ptr += 5;
+        *max_len -= 5;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</dl>\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "</dl>\n");
+        *writing_ptr += 6;
+        *max_len -= 6;
         break;
 
       case NODE_DEFINITION_LIST_TERM:
-        printf ("<dt>");
+        snprintf (*writing_ptr, *max_len, "<dt>");
+        *writing_ptr += 4;
+        *max_len -= 4;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</dt>\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "</dt>\n");
+        *writing_ptr += 6;
+        *max_len -= 6;
         break;
 
       case NODE_DEFINITION_LIST_DEFINITION:
-        printf ("<dd>");
+        snprintf (*writing_ptr, *max_len, "<dd>");
+        *writing_ptr += 4;
+        *max_len -= 4;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</dd>\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "</dd>\n");
+        *writing_ptr += 6;
+        *max_len -= 6;
         break;
 
       case NODE_PREFORMATTED_TEXT:
-        printf ("<pre>\n");
+        snprintf (*writing_ptr, *max_len, "<pre>\n");
+        *writing_ptr += 6;
+        *max_len -= 6;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</pre>\n\n");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "</pre>\n\n");
+        *writing_ptr += 8;
+        *max_len -= 8;
         break;
 
       case NODE_INLINE_TEMPLATE:
-        printf ("<code>");
+        snprintf (*writing_ptr, *max_len, "<code>{{");
+        *writing_ptr += 8;
+        *max_len -= 8;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("</code>");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "}}</code>");
+        *writing_ptr += 9;
+        *max_len -= 9;
         break;
 
       case NODE_STRONG_AND_EMPHASIS:
-        printf ("**_");
+        snprintf (*writing_ptr, *max_len, "**_");
+        *writing_ptr += 3;
+        *max_len -= 3;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("_**");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "_**");
+        *writing_ptr += 3;
+        *max_len -= 3;
         break;
 
       case NODE_STRONG:
-        printf ("**");
+        snprintf (*writing_ptr, *max_len, "**");
+        *writing_ptr += 2;
+        *max_len -= 2;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("**");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "**");
+        *writing_ptr += 2;
+        *max_len -= 2;
         break;
 
       case NODE_EMPHASIS:
-        printf ("_");
+        snprintf (*writing_ptr, *max_len, "_");
+        *writing_ptr += 1;
+        *max_len -= 1;
+
         for (size_t i = 0; i < node->children_len; i++)
-          dump (node->children[i]);
-        printf ("_");
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "_");
+        *writing_ptr += 1;
+        *max_len -= 1;
+        break;
+
+      case NODE_INTERNAL_LINK:
+        dump_internal_link (node, writing_ptr, max_len);
         break;
 
       default:
-        err = 1;
         fprintf (stderr, "dump() : unknown node type : %ld\n", node->type);
-        goto cleanup;
+        return 1;
     }
 
-  cleanup:
-  return err;
+  return 0;
 }
 
 int
@@ -830,6 +1011,7 @@ main (int argc, char **argv)
 {
   int err = 0;
   node_t *root = NULL;
+  char *content = NULL;
 
   if (argc > 1 && (strncmp (argv[1], "-h", 10) == 0 || strncmp (argv[1], "--help", 10) == 0))
     {
@@ -863,14 +1045,20 @@ main (int argc, char **argv)
       goto cleanup;
     }
 
-  err = dump (root);
+  content = xalloc (MAX_FILE_SIZE);
+  size_t max_len = MAX_FILE_SIZE - 1;
+  char *writing_ptr = content;
+  err = dump (root, &writing_ptr, &max_len);
   if (err)
     {
       fprintf (stderr, "main() : error while dumping markdown.\n");
       goto cleanup;
     }
 
+  puts (content);
+
   cleanup:
   if (root) free_node (root);
+  if (content) free (content);
   return err;
 }
