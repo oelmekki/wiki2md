@@ -45,7 +45,6 @@ enum {
   NODE_DEFINITION_LIST_TERM,
   NODE_DEFINITION_LIST_DEFINITION,
   NODE_PREFORMATTED_TEXT,
-  NODE_PREFORMATTED_CODE_BLOCK,
   NODE_LINK,
   NODE_TABLE,
 };
@@ -663,8 +662,6 @@ build_representation (const char *filename, node_t *root)
 
       buffer_ptr[0] = reading_ptr[0];
       buffer_ptr[1] = 0;
-      if (nowiki && buffer_ptr[0] == '\n')
-        buffer_ptr[0] = ' ';
 
       buffer_ptr++;
       reading_ptr++;
@@ -784,10 +781,10 @@ dump (node_t *node)
         break;
 
       case NODE_PREFORMATTED_TEXT:
-        printf ("<pre>");
+        printf ("<pre>\n");
         for (size_t i = 0; i < node->children_len; i++)
           dump (node->children[i]);
-        printf ("</pre>\n");
+        printf ("</pre>\n\n");
         break;
 
       case NODE_INLINE_TEMPLATE:
