@@ -583,45 +583,61 @@ build_representation (const char *filename, node_t *root)
   char *reading_ptr = content;
   char buffer[BUFSIZ] = {0};
   char *buffer_ptr = buffer;
+  bool nowiki = false;
 
   while (true)
     {
-      err = parse_block_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
-      if (err)
+      if (strncmp (reading_ptr, "<nowiki>", 8) == 0 && !nowiki)
         {
-          fprintf (stderr, "build_representation() : error while parsing block end.\n");
-          return err;
+          nowiki = true;
+          reading_ptr += 8;
         }
 
-      if (current_node->can_have_block_children)
+      if (strncmp (reading_ptr, "</nowiki>", 9) == 0 && nowiki)
         {
-          node_t *initial_node = current_node;
-          err = parse_block_start (&current_node, &reading_ptr);
+          nowiki = false;
+          reading_ptr += 9;
+        }
+
+      if (!nowiki)
+        {
+          err = parse_block_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
           if (err)
             {
-              fprintf (stderr, "build_representation() : error while parsing block start.\n");
+              fprintf (stderr, "build_representation() : error while parsing block end.\n");
               return err;
             }
 
-          if (!current_node)
-            break;
+          if (current_node->can_have_block_children)
+            {
+              node_t *initial_node = current_node;
+              err = parse_block_start (&current_node, &reading_ptr);
+              if (err)
+                {
+                  fprintf (stderr, "build_representation() : error while parsing block start.\n");
+                  return err;
+                }
 
-          if (current_node != initial_node)
-            continue;
-        }
+              if (!current_node)
+                break;
 
-      err = parse_inline_start (&current_node, &reading_ptr, buffer, &buffer_ptr);
-      if (err)
-        {
-          fprintf (stderr, "build_representation() : error while parsing for inline tag start.\n");
-          return err;
-        }
+              if (current_node != initial_node)
+                continue;
+            }
 
-      err = parse_inline_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
-      if (err)
-        {
-          fprintf (stderr, "build_representation() : error while parsing for inline tag end.\n");
-          return err;
+          err = parse_inline_start (&current_node, &reading_ptr, buffer, &buffer_ptr);
+          if (err)
+            {
+              fprintf (stderr, "build_representation() : error while parsing for inline tag start.\n");
+              return err;
+            }
+
+          err = parse_inline_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
+          if (err)
+            {
+              fprintf (stderr, "build_representation() : error while parsing for inline tag end.\n");
+              return err;
+            }
         }
 
       if (buffer_ptr - buffer == BUFSIZ - 1)
@@ -636,6 +652,9 @@ build_representation (const char *filename, node_t *root)
 
       buffer_ptr[0] = reading_ptr[0];
       buffer_ptr[1] = 0;
+      if (nowiki && buffer_ptr[0] == '\n')
+        buffer_ptr[0] = ' ';
+
       buffer_ptr++;
       reading_ptr++;
 
