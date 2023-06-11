@@ -501,6 +501,14 @@ parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, cha
           new_node->type = NODE_INTERNAL_LINK;
           *reading_ptr += 2;
         }
+      // NODE_EXTERNAL_LINK
+      else if (strncmp (*reading_ptr, "[", 1) == 0)
+        {
+          tag_matched = true;
+          new_node = xalloc (sizeof *new_node);
+          new_node->type = NODE_EXTERNAL_LINK;
+          *reading_ptr += 1;
+        }
 
       if (!tag_matched)
         break;
@@ -564,6 +572,13 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
               return 0;
 
             *reading_ptr += 2;
+            break;
+
+          case NODE_EXTERNAL_LINK:
+            if (strncmp (*reading_ptr, "]", 1) != 0)
+              return 0;
+
+            *reading_ptr += 1;
             break;
 
           default:
@@ -697,6 +712,7 @@ build_representation (const char *filename, node_t *root)
 }
 
 static int dump (node_t *node, char **writing_ptr, size_t *max_len);
+
 /*
  * Convert a mediawiki internal link to markdown.
  *
@@ -738,6 +754,54 @@ dump_internal_link (node_t *node, char **writing_ptr, size_t *max_len)
 
   size_t out_len = strlen (text) + strlen (url) + 7;
   snprintf (*writing_ptr, *max_len, "[%s](%s.md)", text, url);
+  *writing_ptr += out_len;
+  *max_len -= out_len;
+
+  return 0;
+}
+
+/*
+ * Convert a mediawiki external link to markdown.
+ *
+ * More parsing is done here to match the various components
+ * of the links.
+ */
+static int
+dump_external_link (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  char link_def[MAX_LINK_LENGTH] = {0};
+  char *link_ptr = link_def;
+  size_t link_max_len = MAX_LINK_LENGTH;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      int err = dump (node->children[i], &link_ptr, &link_max_len);
+      if (err)
+        {
+          fprintf (stderr, "dump_external_link() : error while processing link content.\n");
+          return 1;
+        }
+    }
+
+  if (strlen (link_def) == 0)
+    {
+      fprintf (stderr, "dump_external_link() : warning : empty link detected.\n");
+      return 1;
+    }
+
+  char *text = strstr (link_def, " ");
+  char url[MAX_LINK_LENGTH] = {0};
+  snprintf (url, (text ? (size_t) (text - link_def) : strlen (link_def)) + 1, "%s", link_def);
+
+  if (text)
+    while (text[0] == ' ')
+      text++;
+
+  if (!text || !strlen (text))
+    text = url;
+
+  size_t out_len = strlen (text) + strlen (url) + 4;
+  snprintf (*writing_ptr, *max_len, "[%s](%s)", text, url);
   *writing_ptr += out_len;
   *max_len -= out_len;
 
@@ -996,6 +1060,10 @@ dump (node_t *node, char **writing_ptr, size_t *max_len)
 
       case NODE_INTERNAL_LINK:
         dump_internal_link (node, writing_ptr, max_len);
+        break;
+
+      case NODE_EXTERNAL_LINK:
+        dump_external_link (node, writing_ptr, max_len);
         break;
 
       default:
