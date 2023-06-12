@@ -39,6 +39,8 @@ enum {
   NODE_BULLET_LIST_ITEM,
   NODE_NUMBERED_LIST,
   NODE_NUMBERED_LIST_ITEM,
+  NODE_GALLERY,
+  NODE_GALLERY_ITEM,
   NODE_HORIZONTAL_RULE,
   NODE_INLINE_TEMPLATE,
   NODE_NOWIKI,
@@ -175,6 +177,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
   node_t *new_node = NULL;
   new_node = xalloc (sizeof *new_node);
   int new_child_node = 0;
+  size_t list_item_markup_len = 0;
 
   // NODE_HEADING
   if (strncmp (*reading_ptr, "==", 2) == 0)
@@ -218,6 +221,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
           new_node->type = NODE_BULLET_LIST;
           new_node->can_have_block_children = true;
           new_child_node = NODE_BULLET_LIST_ITEM;
+          list_item_markup_len = 1;
         }
     }
   // NODE_NUMBERED_LIST and NODE_NUMBERED_LIST_ITEM
@@ -238,6 +242,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
           new_node->type = NODE_NUMBERED_LIST;
           new_node->can_have_block_children = true;
           new_child_node = NODE_NUMBERED_LIST_ITEM;
+          list_item_markup_len = 1;
         }
     }
   // NODE_DEFINITION_LIST and NODE_DEFINITION_LIST_TERM
@@ -246,6 +251,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
       new_node->type = NODE_DEFINITION_LIST;
       new_node->can_have_block_children = true;
       new_child_node = NODE_DEFINITION_LIST_TERM;
+      list_item_markup_len = 1;
     }
   // NODE_DEFINITION_LIST and NODE_DEFINITION_LIST_DEFINITION
   else if (strncmp (*reading_ptr, ":", 1) == 0)
@@ -260,6 +266,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
           new_node->type = NODE_DEFINITION_LIST;
           new_node->can_have_block_children = true;
           new_child_node = NODE_DEFINITION_LIST_DEFINITION;
+          list_item_markup_len = 1;
         }
     }
   // NODE_PREFORMATTED_TEXT
@@ -267,6 +274,17 @@ parse_block_start (node_t **current_node, char **reading_ptr)
     {
       new_node->type = NODE_PREFORMATTED_TEXT;
       (*reading_ptr)++;
+    }
+  // NODE_GALLERY
+  else if (strncmp (*reading_ptr, "<gallery>", 9) == 0)
+    {
+      new_node->type = NODE_GALLERY;
+      new_node->can_have_block_children = true;
+      new_child_node = NODE_GALLERY_ITEM;
+      *reading_ptr += 9;
+      list_item_markup_len = 0;
+      while (*reading_ptr[0] == '\n')
+        (*reading_ptr)++;
     }
   else
     new_node->type = NODE_PARAGRAPH;
@@ -284,7 +302,7 @@ parse_block_start (node_t **current_node, char **reading_ptr)
       list_item->is_block_level = true;
       append_child (new_node, list_item);
       *current_node = list_item;
-      (*reading_ptr)++;
+      *reading_ptr += list_item_markup_len;
     }
 
   return err;
@@ -305,6 +323,7 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
         return 0;
 
       node_t *block = *current_node;
+      node_t *next_item = NULL;
       bool close_parent_too = false;
       while (block && !block->is_block_level)
         block = block->parent;
@@ -425,6 +444,33 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
               return 0;
             break;
 
+          case NODE_GALLERY:
+            if (strncmp (*reading_ptr, "</gallery>", 10) != 0)
+              return 0;
+
+            *reading_ptr += 10;
+            break;
+
+          case NODE_GALLERY_ITEM:
+            if (strncmp (*reading_ptr, "\n", 1) != 0 && strncmp (*reading_ptr, "</gallery>", 10) != 0)
+              return 0;
+
+            if (strncmp (*reading_ptr, "\n", 1) == 0 && strncmp (*reading_ptr, "\n</gallery>", 11) != 0)
+              {
+                // not ideal to put it here, but since those list items are not prepended
+                // by any markup, it makes things easier than to handle it in parse_block_start().
+
+                next_item = xalloc (sizeof *next_item);
+                next_item->type = NODE_GALLERY_ITEM;
+                next_item->is_block_level = true;
+                append_child ((*current_node)->parent, next_item);
+              }
+
+            if (strncmp (*reading_ptr, "</gallery>", 10) == 0)
+              *reading_ptr += 10;
+
+            break;
+
           default:
             fprintf (stderr, "parse_block_end() : unknown node type : %ld\n", (*current_node)->type);
             return 1;
@@ -440,9 +486,15 @@ parse_block_end (node_t **current_node, char **reading_ptr, char *buffer, char *
           return err;
         }
 
-      *current_node = block->parent;
-      if (close_parent_too)
-        *current_node = (*current_node)->parent;
+      if (next_item)
+        *current_node = next_item;
+      else
+        {
+          *current_node = block->parent;
+
+          if (close_parent_too)
+            *current_node = (*current_node)->parent;
+        }
     }
 
   return err;
@@ -753,14 +805,14 @@ dump_media (node_t *node, char **writing_ptr, size_t *max_len)
       int err = dump (node->children[i], &link_ptr, &link_max_len);
       if (err)
         {
-          fprintf (stderr, "dump_internal_link() : error while processing link content.\n");
+          fprintf (stderr, "dump_media() : error while processing link content.\n");
           return 1;
         }
     }
 
   if (strlen (link_def) == 0)
     {
-      fprintf (stderr, "dump_internal_link() : warning : empty link detected.\n");
+      fprintf (stderr, "dump_media() : warning : empty link detected.\n");
       return 1;
     }
 
@@ -785,17 +837,23 @@ dump_media (node_t *node, char **writing_ptr, size_t *max_len)
     last_pipe = url;
 
   bool is_image = false;
+  char *lower_url = strdup (url);
+
+  for (size_t i = 0; i < strlen (lower_url); i++)
+    lower_url[i] = tolower (lower_url[i]);
 
   for (size_t i = 0; i < SUPPORTED_IMAGE_FORMATS; i++)
     {
       const char *format = image_formats[i];
-      char *match = strstr (url, format);
+      char *match = strstr (lower_url, format);
       if (match && strlen (match) == strlen (format))
         {
           is_image = true;
           break;
         }
     }
+
+  free (lower_url);
 
   size_t out_len = 0;
 
@@ -1107,6 +1165,26 @@ dump (node_t *node, char **writing_ptr, size_t *max_len)
         snprintf (*writing_ptr, *max_len, "</pre>\n\n");
         *writing_ptr += 8;
         *max_len -= 8;
+        break;
+
+      case NODE_GALLERY:
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
+
+        for (size_t i = 0; i < node->children_len; i++)
+          dump (node->children[i], writing_ptr, max_len);
+
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
+        break;
+
+      case NODE_GALLERY_ITEM:
+        dump_media (node, writing_ptr, max_len);
+        snprintf (*writing_ptr, *max_len, "\n");
+        (*writing_ptr)++;
+        (*max_len)--;
         break;
 
       case NODE_INLINE_TEMPLATE:
