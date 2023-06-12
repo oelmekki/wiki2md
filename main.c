@@ -48,6 +48,7 @@ enum {
   NODE_PREFORMATTED_TEXT,
   NODE_INTERNAL_LINK,
   NODE_EXTERNAL_LINK,
+  NODE_MEDIA,
   NODE_TABLE,
 };
 
@@ -64,6 +65,9 @@ typedef struct _node_t {
   struct _node_t *previous_sibling;
   struct _node_t *next_sibling;
 } node_t;
+
+#define SUPPORTED_IMAGE_FORMATS 7
+const char *image_formats[SUPPORTED_IMAGE_FORMATS] = { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".tiff" };
 
 /*
  * Add a child to a parent's memory.
@@ -493,6 +497,14 @@ parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, cha
           new_node->type = NODE_INLINE_TEMPLATE;
           *reading_ptr += 2;
         }
+      // NODE_MEDIA
+      else if (strncmp (*reading_ptr, "[[File:", 7) == 0)
+        {
+          tag_matched = true;
+          new_node = xalloc (sizeof *new_node);
+          new_node->type = NODE_MEDIA;
+          *reading_ptr += 2;
+        }
       // NODE_INTERNAL_LINK
       else if (strncmp (*reading_ptr, "[[", 2) == 0)
         {
@@ -535,8 +547,11 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
 {
   int err = 0;
 
-  if (strlen (*reading_ptr) > 1)
+  while (true)
     {
+      if (strlen (*reading_ptr) < 2)
+        return 0;
+
       switch ((*current_node)->type)
         {
           case NODE_STRONG_AND_EMPHASIS:
@@ -562,6 +577,13 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
 
           case NODE_INLINE_TEMPLATE:
             if (strncmp (*reading_ptr, "}}", 2) != 0)
+              return 0;
+
+            *reading_ptr += 2;
+            break;
+
+          case NODE_MEDIA:
+            if (strncmp (*reading_ptr, "]]", 2) != 0)
               return 0;
 
             *reading_ptr += 2;
@@ -712,6 +734,87 @@ build_representation (const char *filename, node_t *root)
 }
 
 static int dump (node_t *node, char **writing_ptr, size_t *max_len);
+
+/*
+ * Convert a mediawiki media link to markdown.
+ *
+ * More parsing is done here to match the various components
+ * of the links.
+ */
+static int
+dump_media (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  char link_def[MAX_LINK_LENGTH] = {0};
+  char *link_ptr = link_def;
+  size_t link_max_len = MAX_LINK_LENGTH;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      int err = dump (node->children[i], &link_ptr, &link_max_len);
+      if (err)
+        {
+          fprintf (stderr, "dump_internal_link() : error while processing link content.\n");
+          return 1;
+        }
+    }
+
+  if (strlen (link_def) == 0)
+    {
+      fprintf (stderr, "dump_internal_link() : warning : empty link detected.\n");
+      return 1;
+    }
+
+  char *first_pipe = strstr (link_def, "|");
+  char *last_pipe = first_pipe;
+  if (last_pipe)
+    {
+      last_pipe++;
+      while (true)
+        {
+          char *next = strstr (last_pipe, "|");
+          if (next)
+            last_pipe = ++next;
+          else
+            break;
+        }
+    }
+  char url[MAX_LINK_LENGTH] = {0};
+  snprintf (url, (first_pipe ? (size_t) (first_pipe - link_def) : strlen (link_def)) + 1, "%s", link_def);
+
+  if (!last_pipe || !strlen (last_pipe))
+    last_pipe = url;
+
+  bool is_image = false;
+
+  for (size_t i = 0; i < SUPPORTED_IMAGE_FORMATS; i++)
+    {
+      const char *format = image_formats[i];
+      char *match = strstr (url, format);
+      if (match && strlen (match) == strlen (format))
+        {
+          is_image = true;
+          break;
+        }
+    }
+
+  size_t out_len = 0;
+
+  if (is_image)
+    {
+      out_len = strlen (last_pipe) + strlen (url) + 5;
+      snprintf (*writing_ptr, *max_len, "![%s](%s)", last_pipe, url);
+    }
+  else
+    {
+      out_len = strlen (last_pipe) + strlen (url) + 4;
+      snprintf (*writing_ptr, *max_len, "[%s](%s)", last_pipe, url);
+    }
+
+  *writing_ptr += out_len;
+  *max_len -= out_len;
+
+  return 0;
+}
 
 /*
  * Convert a mediawiki internal link to markdown.
@@ -1056,6 +1159,10 @@ dump (node_t *node, char **writing_ptr, size_t *max_len)
         snprintf (*writing_ptr, *max_len, "_");
         *writing_ptr += 1;
         *max_len -= 1;
+        break;
+
+      case NODE_MEDIA:
+        dump_media (node, writing_ptr, max_len);
         break;
 
       case NODE_INTERNAL_LINK:
