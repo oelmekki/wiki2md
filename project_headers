@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# used for generating ctags in C projects.
+gcc -M *.c $* | sed -e 's/[\\ ]/\n/g' | sed -e '/^$/d' -e '/\.o:[ \t]*$/d'
