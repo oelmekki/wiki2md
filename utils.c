@@ -10,7 +10,7 @@ xalloc (size_t len)
   void *mem = calloc (1, len);
   if (!mem)
     {
-      fprintf (stderr, "xalloc() : can't allocated memory\n");
+      fprintf (stderr, "utils.c : xalloc() : can't allocated memory\n");
       exit (1);
     }
 
@@ -26,7 +26,7 @@ xrealloc (void *mem, size_t msize)
   mem = realloc (mem, msize);
   if (!mem)
     {
-      fprintf (stderr, "xrealloc() : can't allocate %zu bytes of memory\n", msize);
+      fprintf (stderr, "utils.c : xrealloc() : can't allocate %zu bytes of memory\n", msize);
       exit (1);
     }
 

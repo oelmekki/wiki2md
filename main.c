@@ -54,11 +54,12 @@ main (int argc, char **argv)
 
   root = xalloc (sizeof *root);
   root->type = NODE_ROOT;
+  root->is_block_level = true;
   root->can_have_block_children = true;
   err = parse (filename, root);
   if (err)
     {
-      fprintf (stderr, "main() : error while building representation of file.\n");
+      fprintf (stderr, "main.c : main() : error while building representation of file.\n");
       goto cleanup;
     }
 
@@ -68,7 +69,7 @@ main (int argc, char **argv)
   err = dump (root, &writing_ptr, &max_len);
   if (err)
     {
-      fprintf (stderr, "main() : error while dumping markdown.\n");
+      fprintf (stderr, "main.c : main() : error while dumping markdown.\n");
       goto cleanup;
     }
 
