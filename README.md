@@ -2,12 +2,12 @@
 
 Wiki2md is a parser converting mediawiki syntax to markdown.
 
-> !WORK IN PROGRESS! I'm currently building wiki2md in the open, it's
-> not ready for production usage yet, I'm just building in the open.
+> !WORK IN PROGRESS! I'm currently working on wiki2md, it's not ready for
+> production usage yet, I'm just building in the open.
 
 ## Why?
 
-I use that to keep local copies on my favorite wikis as markdown files,
+I use that to keep local copies of my favorite wikis as markdown files,
 since I've already implemented support for markdown in my browser and I'm
 familiar with reading the format in plain text. Probably an edge case, but
 hey, if you need to convert wiki markup to markdown, it's here. There's a
