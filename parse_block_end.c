@@ -27,11 +27,13 @@ typedef struct {
 static bool
 template_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "}}", 2) != 0 || (params->current_node->type == NODE_INLINE_TEMPLATE))
-    return false;
+  if (strncmp (*params->reading_ptr, "}}", 2) == 0 && (params->current_node->type != NODE_INLINE_TEMPLATE))
+    {
+      *params->reading_ptr += 2;
+      return true;
+    }
 
-  *params->reading_ptr += 2;
-  return true;
+  return false;
 }
 
 /*
@@ -40,10 +42,10 @@ template_block_end_parser (parsing_block_end_params_t *params)
 static bool
 bullet_list_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n\n", 2) != 0 && strncmp (*params->reading_ptr, "\n----", 5) != 0 && strncmp (*params->reading_ptr, "\n==", 3) != 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 /*
@@ -54,13 +56,17 @@ bullet_list_item_block_end_parser (parsing_block_end_params_t *params)
 {
   bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
   bool is_end_of_item = strncmp (*params->reading_ptr, "\n*", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
-  if (!is_end_of_list && !is_end_of_item)
-    return false;
 
-  if (is_end_of_list)
-    *params->close_parent_too = true;
+  if (is_end_of_list && is_end_of_item)
+    {
+      if (is_end_of_list)
+        *params->close_parent_too = true;
 
-  return true;
+      return true;
+    }
+
+
+  return false;
 }
 
 /*
@@ -71,13 +77,16 @@ definition_list_term_block_end_parser (parsing_block_end_params_t *params)
 {
   bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
   bool is_end_of_term = strncmp (*params->reading_ptr, "\n:", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
-  if (!is_end_of_list && !is_end_of_term)
-    return false;
 
-  if (is_end_of_list)
-    *params->close_parent_too = true;
+  if (is_end_of_list || is_end_of_term)
+    {
+      if (is_end_of_list)
+        *params->close_parent_too = true;
 
-  return true;
+      return true;
+    }
+
+  return false;
 }
 
 /*
@@ -86,10 +95,10 @@ definition_list_term_block_end_parser (parsing_block_end_params_t *params)
 static bool
 definition_list_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n\n", 2) != 0 && strncmp (*params->reading_ptr, "\n----", 5) != 0 && strncmp (*params->reading_ptr, "\n==", 3) != 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 /*
@@ -101,13 +110,15 @@ definition_list_definition_block_end_parser (parsing_block_end_params_t *params)
   bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
   bool is_end_of_definition = strncmp (*params->reading_ptr, "\n:", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
 
-  if (!is_end_of_list && !is_end_of_definition)
-    return false;
+  if (is_end_of_list || is_end_of_definition)
+    {
+      if (is_end_of_list)
+        *params->close_parent_too = true;
 
-  if (is_end_of_list)
-    *params->close_parent_too = true;
+      return true;
+    }
 
-  return true;
+  return false;
 }
 
 /*
@@ -116,11 +127,13 @@ definition_list_definition_block_end_parser (parsing_block_end_params_t *params)
 static bool
 gallery_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "</gallery>", 10) != 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
+    {
+      *params->reading_ptr += 10;
+      return true;
+    }
 
-  *params->reading_ptr += 10;
-  return true;
+  return false;
 }
 
 /*
@@ -129,24 +142,26 @@ gallery_block_end_parser (parsing_block_end_params_t *params)
 static bool
 gallery_item_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n", 1) != 0 && strncmp (*params->reading_ptr, "</gallery>", 10) != 0)
-    return false;
-
-  if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "\n</gallery>", 11) != 0)
+  if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
     {
-      // not ideal to put it here, but since those list items are not prepended
-      // by any markup, it makes things easier than to handle it in parse_block_start().
+      if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "\n</gallery>", 11) != 0)
+        {
+          // not ideal to put it here, but since those list items are not prepended
+          // by any markup, it makes things easier than to handle it in parse_block_start().
 
-      *params->next_item = xalloc (sizeof **params->next_item);
-      (*params->next_item)->type = NODE_GALLERY_ITEM;
-      (*params->next_item)->is_block_level = true;
-      append_child (params->current_node->parent, *params->next_item);
+          *params->next_item = xalloc (sizeof **params->next_item);
+          (*params->next_item)->type = NODE_GALLERY_ITEM;
+          (*params->next_item)->is_block_level = true;
+          append_child (params->current_node->parent, *params->next_item);
+        }
+
+      if (strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
+        *params->reading_ptr += 10;
+
+      return true;
     }
 
-  if (strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
-    *params->reading_ptr += 10;
-
-  return true;
+  return false;
 }
 
 /*
@@ -160,16 +175,18 @@ heading_block_end_parser (parsing_block_end_params_t *params)
     closing_tag[i] = '=';
   closing_tag[strlen (closing_tag)] = '='; // because h1 is "==", we need one more.
 
-  if (strncmp (*params->reading_ptr, closing_tag, strlen (closing_tag)) != 0)
-    return 0;
+  if (strncmp (*params->reading_ptr, closing_tag, strlen (closing_tag)) == 0)
+    {
+      while (*params->reading_ptr[0] != '\n' && *params->reading_ptr[0] != 0)
+        (*params->reading_ptr)++;
 
-  while (*params->reading_ptr[0] != '\n' && *params->reading_ptr[0] != 0)
-    (*params->reading_ptr)++;
+      if (*params->reading_ptr[0] == '\n')
+        (*params->reading_ptr)++;
 
-  if (*params->reading_ptr[0] == '\n')
-    (*params->reading_ptr)++;
+      return true;
+    }
 
-  return true;
+  return false;
 }
 
 /*
@@ -178,10 +195,10 @@ heading_block_end_parser (parsing_block_end_params_t *params)
 static bool
 horizontal_rule_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (*params->reading_ptr[0] != '\n' && *params->reading_ptr[0] != 0)
-    return false;
+  if (*params->reading_ptr[0] == '\n' || *params->reading_ptr[0] == 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 /*
@@ -190,10 +207,10 @@ horizontal_rule_block_end_parser (parsing_block_end_params_t *params)
 static bool
 numbered_list_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n\n", 2) != 0 && strncmp (*params->reading_ptr, "\n----", 5) != 0 && strncmp (*params->reading_ptr, "\n==", 3) != 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 /*
@@ -204,13 +221,16 @@ numbered_list_item_block_end_parser (parsing_block_end_params_t *params)
 {
   bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
   bool is_end_of_item = strncmp (*params->reading_ptr, "\n#", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
-  if (!is_end_of_list && !is_end_of_item)
-    return 0;
 
-  if (is_end_of_list)
-    *params->close_parent_too = true;
+  if (is_end_of_list || is_end_of_item)
+    {
+      if (is_end_of_list)
+        *params->close_parent_too = true;
 
-  return true;
+      return true;
+    }
+
+  return false;
 }
 
 /*
@@ -219,10 +239,10 @@ numbered_list_item_block_end_parser (parsing_block_end_params_t *params)
 static bool
 preformated_text_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n", 1) != 0 || strncmp (*params->reading_ptr, "\n ", 2) == 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "\n ", 2) != 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 /*
@@ -231,10 +251,10 @@ preformated_text_block_end_parser (parsing_block_end_params_t *params)
 static bool
 paragraph_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n\n", 2) != 0 && strncmp (*params->reading_ptr, "\n----", 5) != 0 && strncmp (*params->reading_ptr, "\n==", 3) != 0)
-    return false;
+  if (strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0)
+    return true;
 
-  return true;
+  return false;
 }
 
 parser_def_t block_end_parsers[BLOCK_LEVEL_NODES_COUNT] = {

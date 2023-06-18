@@ -17,11 +17,13 @@ typedef struct {
 static bool
 emphasis_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "''", 2) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "''", 2) == 0)
+    {
+      *reading_ptr += 2;
+      return true;
+    }
 
-  *reading_ptr += 2;
-  return true;
+  return false;
 }
 
 /*
@@ -30,11 +32,13 @@ emphasis_inline_end_parser (char **reading_ptr)
 static bool
 external_link_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "]", 1) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "]", 1) == 0)
+    {
+      *reading_ptr += 1;
+      return true;
+    }
 
-  *reading_ptr += 1;
-  return true;
+  return false;
 }
 
 /*
@@ -43,11 +47,13 @@ external_link_inline_end_parser (char **reading_ptr)
 static bool
 template_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "}}", 2) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "}}", 2) == 0)
+    {
+      *reading_ptr += 2;
+      return true;
+    }
 
-  *reading_ptr += 2;
-  return true;
+  return false;
 }
 
 /*
@@ -56,11 +62,13 @@ template_inline_end_parser (char **reading_ptr)
 static bool
 internal_link_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "]]", 2) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "]]", 2) == 0)
+    {
+      *reading_ptr += 2;
+      return true;
+    }
 
-  *reading_ptr += 2;
-  return true;
+  return false;
 }
 
 /*
@@ -69,11 +77,13 @@ internal_link_inline_end_parser (char **reading_ptr)
 static bool
 media_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "]]", 2) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "]]", 2) == 0)
+    {
+      *reading_ptr += 2;
+      return true;
+    }
 
-  *reading_ptr += 2;
-  return true;
+  return false;
 }
 
 /*
@@ -82,11 +92,13 @@ media_inline_end_parser (char **reading_ptr)
 static bool
 strong_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "'''", 3) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "'''", 3) == 0)
+    {
+      *reading_ptr += 3;
+      return true;
+    }
 
-  *reading_ptr += 3;
-  return true;
+  return false;
 }
 
 /*
@@ -95,11 +107,13 @@ strong_inline_end_parser (char **reading_ptr)
 static bool
 strong_and_emphasis_inline_end_parser (char **reading_ptr)
 {
-  if (strncmp (*reading_ptr, "'''''", 5) != 0)
-    return false;
+  if (strncmp (*reading_ptr, "'''''", 5) == 0)
+    {
+      *reading_ptr += 5;
+      return true;
+    }
 
-  *reading_ptr += 5;
-  return true;
+  return false;
 }
 
 /*
