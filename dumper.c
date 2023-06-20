@@ -473,6 +473,123 @@ preformated_text_block_dumper (node_t *node, char **writing_ptr, size_t *max_len
 }
 
 /*
+ * Generates markdown for NODE_TABLE.
+ */
+static int
+table_block_dumper (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  int err = 0;
+
+  if (node->children_len == 0)
+    {
+      fprintf (stderr, "dumper.c : table_block_dumper() : empty table.\n");
+      return 1;
+    }
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      node_t *child = node->children[i];
+      if (child->is_block_level && child->type == NODE_TABLE_CAPTION && child->children_len > 0 && !child->children[0]->is_block_level && child->children[0]->type == NODE_TEXT)
+        {
+          char caption[*max_len];
+          memset (caption, 0, *max_len);
+          snprintf (caption, *max_len - 1, "**%s**\n\n", child->children[0]->text_content);
+          snprintf (*writing_ptr, *max_len, "%s", caption);
+          *writing_ptr += strlen (caption);
+          *max_len -= strlen (caption);
+        }
+    }
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      node_t *child = node->children[i];
+      if ((!child->is_block_level && child->type == NODE_TEXT) || (child->is_block_level && child->type == NODE_TABLE_CAPTION))
+        continue;
+
+      err = dump (node->children[i], writing_ptr, max_len);
+      if (err)
+        {
+          fprintf (stderr, "dumper.c : table_block_dumper() : can't dump child.\n");
+          return err;
+        }
+    }
+
+  return 0;
+}
+
+/*
+ * Generates markdown for NODE_TABLE_CAPTION.
+ *
+ * NOOP: caption is managed in table_block_dumper.
+ */
+static int
+table_caption_block_dumper (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  (void) node;
+  (void) writing_ptr;
+  (void) max_len;
+  return 0;
+}
+
+/*
+ * Generates markdown for NODE_TABLE_ROW.
+ */
+static int
+table_row_block_dumper (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  int err = 0;
+  bool is_header = false;
+  size_t col_count = 0;
+
+  if (node->children_len == 0)
+    {
+      fprintf (stderr, "dumper.c : table_row_block_dumper() : empty row.\n");
+      return 1;
+    }
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      node_t *child = node->children[i];
+
+      if (!child->is_block_level && child->type == NODE_TEXT && strlen (child->text_content) == 0)
+        continue;
+
+      col_count++;
+
+      if (!child->is_block_level && child->type == NODE_TABLE_HEADER)
+        is_header = true;
+
+      err = dump (node->children[i], writing_ptr, max_len);
+      if (err)
+        {
+          fprintf (stderr, "dumper.c : paragraph_block_dumper() : can't dump child.\n");
+          return err;
+        }
+    }
+
+  if (is_header)
+    {
+      snprintf (*writing_ptr, *max_len, "\n--");
+      *writing_ptr += 3;
+      *max_len -= 3;
+
+      if (col_count > 1)
+        for (size_t i = 0; i < col_count - 1; i++)
+          {
+            snprintf (*writing_ptr, *max_len, "|--");
+            *writing_ptr += 3;
+            *max_len -= 3;
+          }
+    }
+
+  snprintf (*writing_ptr, *max_len, "\n");
+  (*writing_ptr)++;
+  (*max_len)--;
+
+  return 0;
+}
+
+/*
  * Generates markdown for NODE_PARAGRAPH.
  */
 static int
@@ -721,6 +838,64 @@ strong_and_emphasis_inline_dumper (node_t *node, char **writing_ptr, size_t *max
 }
 
 /*
+ * Generates markdown for NODE_TABLE_HEADER.
+ */
+static int
+table_header_inline_dumper (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  int err = 0;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      err = dump (node->children[i], writing_ptr, max_len);
+      if (err)
+        {
+          fprintf (stderr, "dumper.c : table_cell_inline_dumper() : can't dump child.\n");
+          return err;
+        }
+    }
+
+  if (node != node->parent->last_child)
+    {
+      snprintf (*writing_ptr, *max_len, "|");
+      *writing_ptr += 1;
+      *max_len -= 1;
+    }
+
+
+  return err;
+}
+
+/*
+ * Generates markdown for NODE_TABLE_CELL.
+ */
+static int
+table_cell_inline_dumper (node_t *node, char **writing_ptr, size_t *max_len)
+{
+  int err = 0;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    {
+      err = dump (node->children[i], writing_ptr, max_len);
+      if (err)
+        {
+          fprintf (stderr, "dumper.c : table_cell_inline_dumper() : can't dump child.\n");
+          return err;
+        }
+    }
+
+  if (node != node->parent->last_child)
+    {
+      snprintf (*writing_ptr, *max_len, "|");
+      *writing_ptr += 1;
+      *max_len -= 1;
+    }
+
+
+  return err;
+}
+
+/*
  * Generates markdown for NODE_TEXT.
  */
 static int
@@ -756,6 +931,9 @@ dumper_def_t block_dumpers[BLOCK_LEVEL_NODES_COUNT] = {
   { .type = NODE_NUMBERED_LIST, .handler = numbered_list_block_dumper },
   { .type = NODE_NUMBERED_LIST_ITEM, .handler = numbered_list_item_block_dumper },
   { .type = NODE_PREFORMATTED_TEXT, .handler = preformated_text_block_dumper },
+  { .type = NODE_TABLE, .handler = table_block_dumper },
+  { .type = NODE_TABLE_CAPTION, .handler = table_caption_block_dumper },
+  { .type = NODE_TABLE_ROW, .handler = table_row_block_dumper },
   { .type = NODE_PARAGRAPH, .handler = paragraph_block_dumper },
 };
 
@@ -767,6 +945,8 @@ dumper_def_t inline_dumpers[INLINE_NODES_COUNT] = {
   { .type = NODE_MEDIA, .handler = media_inline_dumper },
   { .type = NODE_STRONG, .handler = strong_inline_dumper },
   { .type = NODE_STRONG_AND_EMPHASIS, .handler = strong_and_emphasis_inline_dumper },
+  { .type = NODE_TABLE_HEADER, .handler = table_header_inline_dumper },
+  { .type = NODE_TABLE_CELL, .handler = table_cell_inline_dumper },
   { .type = NODE_TEXT, .handler = text_inline_dumper },
 };
 

@@ -9,6 +9,7 @@ typedef struct {
   node_t *current_node;
   char **reading_ptr;
   node_t **new_node;
+  bool stop_parsing_inline;
 } parsing_inline_start_params_t;
 
 typedef bool (parsing_inline_start_t) (parsing_inline_start_params_t *params);
@@ -141,6 +142,66 @@ media_inline_start_parser (parsing_inline_start_params_t *params)
 }
 
 /*
+ * Parsing start of NODE_TABLE_HEADER.
+ */
+static bool
+table_header_inline_start_parser (parsing_inline_start_params_t *params)
+{
+  if ((params->current_node->parent && params->current_node->parent->type == NODE_TABLE_ROW) || params->current_node->type == NODE_TABLE_ROW)
+    {
+      // we first need to close previous NODE_TABLE_HEADER
+      if (strncmp (*params->reading_ptr, "!!", 2) == 0)
+        {
+          params->stop_parsing_inline = true;
+          return false;
+        }
+
+      if (strncmp (*params->reading_ptr, "!", 1) == 0)
+        {
+          *params->new_node = xalloc (sizeof **params->new_node);
+          (*params->new_node)->type = NODE_TABLE_HEADER;
+          (*params->reading_ptr)++;
+          while (*params->reading_ptr[0] == ' ')
+            (*params->reading_ptr)++;
+
+          return true;
+        }
+    }
+
+  return false;
+}
+
+/*
+ * Parsing start of NODE_TABLE_CELL.
+ */
+static bool
+table_cell_inline_start_parser (parsing_inline_start_params_t *params)
+{
+  if ((params->current_node->parent && params->current_node->parent->type == NODE_TABLE_ROW) || params->current_node->type == NODE_TABLE_ROW)
+    {
+      // we first need to close previous NODE_TABLE_CELL
+      if (strncmp (*params->reading_ptr, "||", 2) == 0)
+        {
+          params->stop_parsing_inline = true;
+          return false;
+        }
+
+      if (strncmp (*params->reading_ptr, "|", 1) == 0)
+        {
+          *params->new_node = xalloc (sizeof **params->new_node);
+          (*params->new_node)->type = NODE_TABLE_CELL;
+          (*params->reading_ptr)++;
+          while (*params->reading_ptr[0] == ' ')
+            (*params->reading_ptr)++;
+
+          return true;
+        }
+    }
+
+  return false;
+}
+
+/*
  * Parsing start of NODE_TEXT.
  *
  * Noop, as it's the default node.
@@ -161,6 +222,8 @@ parser_def_t inline_start_parsers[INLINE_NODES_COUNT] = {
   { .type = NODE_EXTERNAL_LINK, .handler = external_link_inline_start_parser },
   { .type = NODE_INLINE_TEMPLATE, .handler = template_inline_start_parser },
   { .type = NODE_MEDIA, .handler = media_inline_start_parser },
+  { .type = NODE_TABLE_HEADER, .handler = table_header_inline_start_parser },
+  { .type = NODE_TABLE_CELL, .handler = table_cell_inline_start_parser },
   { .type = NODE_TEXT, .handler = text_inline_start_parser },
 };
 
@@ -188,10 +251,11 @@ parse_inline_start (node_t **current_node, char **reading_ptr, char *buffer, cha
             .current_node = *current_node,
             .reading_ptr = reading_ptr,
             .new_node = &new_node,
+            .stop_parsing_inline = false,
           };
 
           tag_matched = def.handler (&params);
-          if (tag_matched)
+          if (tag_matched || params.stop_parsing_inline)
             break;
         }
 

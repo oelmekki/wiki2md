@@ -246,6 +246,45 @@ preformated_text_block_end_parser (parsing_block_end_params_t *params)
 }
 
 /*
+ * Parsing block end for NODE_TABLE.
+ */
+static bool
+table_block_end_parser (parsing_block_end_params_t *params)
+{
+  if (strncmp (*params->reading_ptr, "|}", 2) == 0)
+    {
+      *params->reading_ptr += 2;
+      return true;
+    }
+
+  return false;
+}
+
+/*
+ * Parsing block end for NODE_TABLE_CAPTION.
+ */
+static bool
+table_caption_block_end_parser (parsing_block_end_params_t *params)
+{
+  if (strncmp (*params->reading_ptr, "\n", 1) == 0)
+    return true;
+
+  return false;
+}
+
+/*
+ * Parsing block end for NODE_TABLE_CAPTION.
+ */
+static bool
+table_row_block_end_parser (parsing_block_end_params_t *params)
+{
+  if (strncmp (*params->reading_ptr, "\n|-", 3) == 0 || strncmp (*params->reading_ptr, "|}", 2) == 0)
+    return true;
+
+  return false;
+}
+
+/*
  * Parsing block end for NODE_PARAGRAPH.
  */
 static bool
@@ -271,6 +310,9 @@ parser_def_t block_end_parsers[BLOCK_LEVEL_NODES_COUNT] = {
   { .type = NODE_NUMBERED_LIST, .handler = numbered_list_block_end_parser },
   { .type = NODE_NUMBERED_LIST_ITEM, .handler = numbered_list_item_block_end_parser },
   { .type = NODE_PREFORMATTED_TEXT, .handler = preformated_text_block_end_parser },
+  { .type = NODE_TABLE, .handler = table_block_end_parser },
+  { .type = NODE_TABLE_CAPTION, .handler = table_caption_block_end_parser },
+  { .type = NODE_TABLE_ROW, .handler = table_row_block_end_parser },
   { .type = NODE_PARAGRAPH, .handler = paragraph_block_end_parser },
 };
 

@@ -117,6 +117,48 @@ strong_and_emphasis_inline_end_parser (char **reading_ptr)
 }
 
 /*
+ * Parsing inline end for NODE_TABLE_CELL.
+ */
+static bool
+table_cell_inline_end_parser (char **reading_ptr)
+{
+  if (strncmp (*reading_ptr, "||", 2) == 0)
+    {
+      (*reading_ptr)++; // eating a single pipe on purpose, to allow matching start of next cell
+      return true;
+    }
+
+  if (strncmp (*reading_ptr, "\n", 1) == 0)
+    {
+      // not eating anything, we'll leave to the block level parent to decide if it's closed.
+      return true;
+    }
+
+  return false;
+}
+
+/*
+ * Parsing inline end for NODE_TABLE_HEADER.
+ */
+static bool
+table_header_inline_end_parser (char **reading_ptr)
+{
+  if (strncmp (*reading_ptr, "!!", 2) == 0)
+    {
+      (*reading_ptr)++; // eating a single pipe on purpose, to allow matching start of next cell
+      return true;
+    }
+
+  if (strncmp (*reading_ptr, "\n", 1) == 0)
+    {
+      // not eating anything, we'll leave to the block level parent to decide if it's closed.
+      return true;
+    }
+
+  return false;
+}
+
+/*
  * Parsing inline end for NODE_TEXT.
  *
  * This is a noop, as this is the default behavior.
@@ -136,6 +178,8 @@ parser_def_t inline_end_parsers[INLINE_NODES_COUNT] = {
   { .type = NODE_MEDIA, .handler = media_inline_end_parser },
   { .type = NODE_STRONG, .handler = strong_inline_end_parser },
   { .type = NODE_STRONG_AND_EMPHASIS, .handler = strong_and_emphasis_inline_end_parser },
+  { .type = NODE_TABLE_CELL, .handler = table_cell_inline_end_parser },
+  { .type = NODE_TABLE_HEADER, .handler = table_header_inline_end_parser },
   { .type = NODE_TEXT, .handler = text_inline_end_parser },
 };
 
@@ -174,6 +218,15 @@ parse_inline_end (node_t **current_node, char **reading_ptr, char *buffer, char 
           fprintf (stderr, "parse_inline_end.c : parse_inline_end() : error while flushing text buffer.\n");
           return err;
         }
+
+      if ((*current_node)->type == NODE_TEXT && strlen ((*current_node)->text_content) == 0)
+        {
+          node_t *parent = (*current_node)->parent;
+          parent->children_len--;
+          free_node (*current_node);
+          *current_node = parent;
+        }
+      else
       *current_node = (*current_node)->parent;
     }
 

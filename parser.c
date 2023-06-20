@@ -69,7 +69,8 @@ flush_text_buffer (node_t *current_node, char *buffer, char **buffer_ptr)
     }
 
   memset (buffer, 0, BUFSIZ);
-  *buffer_ptr = buffer;
+  if (buffer_ptr)
+    *buffer_ptr = buffer;
 
   return err;
 }
@@ -127,6 +128,8 @@ parse (const char *filename, node_t *root)
 
   while (true)
     {
+      node_t *initial_node = current_node;
+
       if (strncmp (reading_ptr, "<nowiki>", 8) == 0 && !nowiki)
         {
           nowiki = true;
@@ -148,9 +151,9 @@ parse (const char *filename, node_t *root)
               return err;
             }
 
+
           if (current_node->can_have_block_children)
             {
-              node_t *initial_node = current_node;
               err = parse_block_start (&current_node, &reading_ptr);
               if (err)
                 {
@@ -172,12 +175,18 @@ parse (const char *filename, node_t *root)
               return err;
             }
 
+          if (current_node != initial_node)
+            continue;
+
           err = parse_inline_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
           if (err)
             {
               fprintf (stderr, "parser.c : parse() : error while parsing for inline tag end.\n");
               return err;
             }
+
+          if (current_node != initial_node)
+            continue;
         }
 
       if (buffer_ptr - buffer == BUFSIZ - 1)

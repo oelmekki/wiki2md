@@ -281,6 +281,87 @@ preformated_text_block_start_parser (parsing_block_start_params_t *params)
 }
 
 /*
+ * Parsing start of NODE_TABLE.
+ */
+static bool
+table_block_start_parser (parsing_block_start_params_t *params)
+{
+  if (strncmp (*params->reading_ptr, "{|", 2) == 0)
+    {
+      params->new_node->type = NODE_TABLE;
+      params->new_node->can_have_block_children = true;
+      *params->reading_ptr += 2;
+      while (*params->reading_ptr[0] == ' ')
+        (*params->reading_ptr)++;
+
+      char buffer[BUFSIZ] = {0};
+      size_t i = 0;
+      while (i < BUFSIZ - 1 && *params->reading_ptr[0] != '\n' && *params->reading_ptr[0] != 0 && strncmp (*params->reading_ptr, "|}", 2) != 0)
+        {
+          buffer[i++] = *params->reading_ptr[0];
+          (*params->reading_ptr)++;
+        }
+
+      while (*params->reading_ptr[0] == '\n')
+        (*params->reading_ptr)++;
+
+      flush_text_buffer (params->new_node, buffer, NULL);
+
+      return true;
+    }
+
+  return false;
+}
+
+/*
+ * Parsing start of NODE_TABLE_CAPTION.
+ */
+static bool
+table_caption_block_start_parser (parsing_block_start_params_t *params)
+{
+  if (strncmp (*params->reading_ptr, "|+", 2) == 0)
+    {
+      params->new_node->type = NODE_TABLE_CAPTION;
+      *params->reading_ptr += 2;
+      while (*params->reading_ptr[0] == ' ')
+        (*params->reading_ptr)++;
+
+      return true;
+    }
+
+  return false;
+}
+
+/*
+ * Parsing start of NODE_TABLE_ROW.
+ */
+static bool
+table_row_block_start_parser (parsing_block_start_params_t *params)
+{
+  // the first line of a table is assumed to be a row if not specified.
+  bool needs_row = params->current_node->parent && params->current_node->parent->type == NODE_TABLE && params->current_node->parent->children_len == 0 && strncmp (*params->reading_ptr, "|+", 2) != 0;
+
+  if (needs_row && (strncmp (*params->reading_ptr, "| ", 2) == 0 || strncmp (*params->reading_ptr, "! ", 2) == 0))
+    {
+      params->new_node->type = NODE_TABLE_ROW;
+      return true;
+    }
+
+  if (strncmp (*params->reading_ptr, "|-", 2) == 0)
+    {
+      params->new_node->type = NODE_TABLE_ROW;
+      *params->reading_ptr += 2;
+
+      while (*params->reading_ptr[0] == ' ' || *params->reading_ptr[0] == '\n')
+        (*params->reading_ptr)++;
+
+      return true;
+    }
+
+  return false;
+}
+
+/*
  * If we reached that point in the parsing pipeline,
  * it's a NODE_PARAGRAPH.
  */
@@ -305,6 +386,9 @@ parser_def_t block_start_parsers[BLOCK_LEVEL_NODES_COUNT] = {
   { .type = NODE_NUMBERED_LIST, .handler = numbered_list_block_start_parser },
   { .type = NODE_NUMBERED_LIST_ITEM, .handler = numbered_list_item_block_start_parser },
   { .type = NODE_PREFORMATTED_TEXT, .handler = preformated_text_block_start_parser },
+  { .type = NODE_TABLE, .handler = table_block_start_parser },
+  { .type = NODE_TABLE_CAPTION, .handler = table_caption_block_start_parser },
+  { .type = NODE_TABLE_ROW, .handler = table_row_block_start_parser },
   { .type = NODE_PARAGRAPH, .handler = paragraph_block_start_parser },
 };
 
