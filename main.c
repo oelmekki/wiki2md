@@ -66,7 +66,15 @@ main (int argc, char **argv)
   content = xalloc (MAX_FILE_SIZE);
   size_t max_len = MAX_FILE_SIZE - 1;
   char *writing_ptr = content;
-  err = dump (root, &writing_ptr, &max_len);
+
+  dumping_params_t params = {
+    .node = root,
+    .writing_ptr = &writing_ptr,
+    .start_of_buffer = content,
+    .max_len = &max_len,
+  };
+
+  err = dump (&params);
   if (err)
     {
       fprintf (stderr, "main.c : main() : error while dumping markdown.\n");
