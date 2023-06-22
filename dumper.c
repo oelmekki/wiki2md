@@ -114,6 +114,39 @@ dump_media (dumping_params_t *params)
 }
 
 /*
+ * Markdown doesn't accept parenthesis in urls, so we need to escape them.
+ */
+static void
+escape_url_for_markdown (const char url[MAX_LINK_LENGTH], char escaped_url[MAX_LINK_LENGTH])
+{
+  char *read_ptr = (char *) url;
+  char *write_ptr = escaped_url;
+  size_t len = strlen (url);
+
+  for (size_t i = 0; i < len; i++)
+    {
+      size_t written = write_ptr - escaped_url;
+      if (read_ptr[0] == '(' && written + 4 < MAX_LINK_LENGTH - 1)
+        {
+          snprintf (write_ptr, 4, "%%28");
+          write_ptr += 3;
+        }
+      else if (read_ptr[0] == ')' && written + 4 < MAX_LINK_LENGTH - 1)
+        {
+          snprintf (write_ptr, 4, "%%29");
+          write_ptr += 3;
+        }
+      else if (written + 2 < MAX_LINK_LENGTH - 1)
+        {
+          write_ptr[0] = read_ptr[0];
+          write_ptr++;
+        }
+
+      read_ptr++;
+    }
+}
+
+/*
  * Generates markdown for NODE_BLOCKLEVEL_TEMPLATE.
  */
 static int
@@ -803,7 +836,9 @@ external_link_inline_dumper (dumping_params_t *params)
 
   char *text = strstr (link_def, " ");
   char url[MAX_LINK_LENGTH] = {0};
+  char escaped_url[MAX_LINK_LENGTH] = {0};
   snprintf (url, (text ? (size_t) (text - link_def) : strlen (link_def)) + 1, "%s", link_def);
+  escape_url_for_markdown (url, escaped_url);
 
   if (text)
     while (text[0] == ' ')
@@ -812,8 +847,8 @@ external_link_inline_dumper (dumping_params_t *params)
   if (!text || !strlen (text))
     text = url;
 
-  size_t out_len = strlen (text) + strlen (url) + 4;
-  snprintf (*params->writing_ptr, *params->max_len, "[%s](%s)", text, url);
+  size_t out_len = strlen (text) + strlen (escaped_url) + 4;
+  snprintf (*params->writing_ptr, *params->max_len, "[%s](%s)", text, escaped_url);
   *params->writing_ptr += out_len;
   *params->max_len -= out_len;
 
@@ -895,7 +930,9 @@ internal_link_inline_dumper (dumping_params_t *params)
 
   char *text = strstr (link_def, "|");
   char url[MAX_LINK_LENGTH] = {0};
+  char escaped_url[MAX_LINK_LENGTH] = {0};
   snprintf (url, (text ? (size_t) (text - link_def) : strlen (link_def)) + 1, "%s", link_def);
+  escape_url_for_markdown (url, escaped_url);
 
   if (text)
     text++;
@@ -903,8 +940,8 @@ internal_link_inline_dumper (dumping_params_t *params)
   if (!text || !strlen (text))
     text = url;
 
-  size_t out_len = strlen (text) + strlen (url) + 7;
-  snprintf (*params->writing_ptr, *params->max_len, "[%s](%s.md)", text, url);
+  size_t out_len = strlen (text) + strlen (escaped_url) + 7;
+  snprintf (*params->writing_ptr, *params->max_len, "[%s](%s.md)", text, escaped_url);
   *params->writing_ptr += out_len;
   *params->max_len -= out_len;
 
