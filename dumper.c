@@ -174,7 +174,10 @@ bullet_list_block_dumper (dumping_params_t *params)
         }
     }
 
-  printf ("\n");
+  snprintf (*params->writing_ptr, *params->max_len, "\n");
+  (*params->writing_ptr)++;
+  (*params->max_len)--;
+
   return err;
 }
 
