@@ -75,8 +75,9 @@ bullet_list_item_block_end_parser (parsing_block_end_params_t *params)
 static bool
 definition_list_term_block_end_parser (parsing_block_end_params_t *params)
 {
-  bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0;
   bool is_end_of_term = *params->reading_ptr[0] == '\n';
+  bool no_follow_up = is_end_of_term && strncmp (*params->reading_ptr, "\n:", 2) != 0;
+  bool is_end_of_list = strncmp (*params->reading_ptr, "\n\n", 2) == 0 || no_follow_up;
 
   if (is_end_of_list || is_end_of_term)
     {
