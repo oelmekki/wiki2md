@@ -142,7 +142,7 @@ gallery_block_end_parser (parsing_block_end_params_t *params)
 static bool
 gallery_item_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
+  if (strncmp (*params->reading_ptr, "\n", 1) == 0 || strncmp (*params->reading_ptr, "</gallery>", 10) == 0)
     {
       if (strncmp (*params->reading_ptr, "\n", 1) == 0 && strncmp (*params->reading_ptr, "\n</gallery>", 11) != 0)
         {
