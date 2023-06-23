@@ -2,9 +2,6 @@
 
 Wiki2md is a parser converting mediawiki syntax to markdown.
 
-> !WORK IN PROGRESS! I'm currently working on wiki2md, it's not ready for
-> production usage yet, I'm just building in the open.
-
 ## Why?
 
 I use that to keep local copies of my favorite wikis as markdown files,
@@ -33,3 +30,19 @@ make install PREFIX=~/bin     # if you want to install somewhere else
 ```shell
 wiki2md file.wiki > file.md
 ```
+
+## Limitations / Todo
+
+* [ ] wiki2md does not handle embedded mixed type lists, like putting a
+  numbered list into the item of an unordered list, or a ordered list into
+  a definition list.
+* [ ] wiki2md does not handle references from
+  [Extension:Cite](https://www.mediawiki.org/wiki/Special:MyLanguage/Extension:Cite)
+* [ ] wiki2md does not handle templates
+
+I'm not sure yet if it will ever handle templates. Showing template code is
+actually more useful than trying to parse it and failing, like the software
+I use previously did (they're not to blame, users can be wild with how they
+stretch mediawiki features, especially on Fandom). On the other hand, maybe
+I can detect it will fail and dump the raw code only in that case. We'll
+see when we get there.
