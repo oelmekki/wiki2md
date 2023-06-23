@@ -19,6 +19,22 @@ typedef struct {
   dumping_node_t *handler;
 } dumper_def_t;
 
+static bool 
+contains_link (node_t *node)
+{
+  if (!node->is_block_level && (node->type == NODE_INTERNAL_LINK || node->type == NODE_EXTERNAL_LINK))
+    return true;
+
+  if (node->children_len == 0)
+    return false;
+
+  for (size_t i = 0; i < node->children_len; i++)
+    if (contains_link (node->children[i]))
+      return true;
+
+  return false;
+}
+
 /*
  * Convert a mediawiki media link to markdown.
  *
@@ -94,21 +110,38 @@ dump_media (dumping_params_t *params)
 
   free (lower_url);
 
-  size_t out_len = 0;
+  char markup[MAX_LINK_LENGTH] = {0};
 
-  if (is_image)
+  if (contains_link (params->node))
     {
-      out_len = strlen (last_pipe) + strlen (url) + 5;
-      snprintf (*params->writing_ptr, *params->max_len, "![%s](%s)", last_pipe, url);
+      if (is_image)
+        {
+          if (snprintf (markup, MAX_LINK_LENGTH - 1, "![%s](%s)\n\n**%s**\n\n", url, url, last_pipe) >= MAX_LINK_LENGTH - 1)
+            fprintf (stderr, "dumper.c : dump_media() : warning : link too long has been truncated : %s, %s\n", last_pipe, url);
+        }
+      else
+        {
+          if (snprintf (markup, MAX_LINK_LENGTH - 1, "[%s](%s)", last_pipe, url) >= MAX_LINK_LENGTH - 1)
+            fprintf (stderr, "dumper.c : dump_media() : warning : link too long has been truncated : %s, %s\n", last_pipe, url);
+        }
     }
   else
     {
-      out_len = strlen (last_pipe) + strlen (url) + 4;
-      snprintf (*params->writing_ptr, *params->max_len, "[%s](%s)", last_pipe, url);
+      if (is_image)
+        {
+          if (snprintf (markup, MAX_LINK_LENGTH - 1, "![%s](%s)", last_pipe, url) >= MAX_LINK_LENGTH - 1)
+            fprintf (stderr, "dumper.c : dump_media() : warning : link too long has been truncated : %s, %s\n", last_pipe, url);
+        }
+      else
+        {
+          if (snprintf (markup, MAX_LINK_LENGTH - 1, "[%s](%s)", last_pipe, url) >= MAX_LINK_LENGTH - 1)
+            fprintf (stderr, "dumper.c : dump_media() : warning : link too long has been truncated : %s, %s\n", last_pipe, url);
+        }
     }
 
-  *params->writing_ptr += out_len;
-  *params->max_len -= out_len;
+  snprintf (*params->writing_ptr, *params->max_len, "%s", markup);
+  *params->writing_ptr += strlen (markup);
+  *params->max_len -= strlen (markup);
 
   return 0;
 }
