@@ -1,5 +1,8 @@
 # wiki2md
 
+> Note to Github users : development is happening on [Gitlab](https://gitlab.com/oelmekki/wiki2md),
+> please go there if you want to open issues or submit merge request.
+
 Wiki2md is a parser converting mediawiki syntax to markdown.
 
 ## Why?
