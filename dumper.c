@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "parser.h"
 #include "dumper.h"
+#include "parser.h"
+#include "utils.h"
 
 #define MAX_LINE_LENGTH 10000
 #define MAX_LINK_LENGTH 5000
@@ -47,6 +48,10 @@ dump_media (dumping_params_t *params)
   char link_def[MAX_LINK_LENGTH] = {0};
   char *link_ptr = link_def;
   size_t link_max_len = MAX_LINK_LENGTH;
+
+  // protect against empty nodes
+  if (params->node->children_len == 1 && is_empty_text_node (params->node->children[0]))
+    return 0;
 
   for (size_t i = 0; i < params->node->children_len; i++)
     {

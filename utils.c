@@ -1,5 +1,19 @@
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+
+#include "parser.h"
+
+
+/*
+ * Tell if given node is a text node containing an empty string.
+ */
+bool
+is_empty_text_node (node_t *node)
+{
+  return !node->is_block_level && node->type == NODE_TEXT && strnlen (node->text_content, 1) == 0;
+}
 
 /*
  * Safely allocates memory.
