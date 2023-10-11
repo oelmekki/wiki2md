@@ -869,7 +869,7 @@ external_link_inline_dumper (dumping_params_t *params)
   if (strlen (link_def) == 0)
     {
       fprintf (stderr, "dumper.c : external_link_inline_dumper() : warning : empty link detected.\n");
-      return 1;
+      snprintf (link_def, 15, "about:blank _");
     }
 
   char *text = strstr (link_def, " ");
