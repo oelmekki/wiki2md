@@ -963,7 +963,7 @@ internal_link_inline_dumper (dumping_params_t *params)
   if (strlen (link_def) == 0)
     {
       fprintf (stderr, "dumper.c : internal_link_inline_dumper() : warning : empty link detected.\n");
-      return 1;
+      snprintf (link_def, 15, "redlink");
     }
 
   char *text = strstr (link_def, "|");
