@@ -285,14 +285,21 @@ table_row_block_end_parser (parsing_block_end_params_t *params)
   return false;
 }
 
+#define PARAGRAPH_ENDING_STRINGS_LEN 7
+const char *paragraph_ending_strings[PARAGRAPH_ENDING_STRINGS_LEN] = { "\n\n", "\n----", "\n==", "\n*", "\n#", "\n:", "\n;"};
+
 /*
  * Parsing block end for NODE_PARAGRAPH.
  */
 static bool
 paragraph_block_end_parser (parsing_block_end_params_t *params)
 {
-  if (strncmp (*params->reading_ptr, "\n\n", 2) == 0 || strncmp (*params->reading_ptr, "\n----", 5) == 0 || strncmp (*params->reading_ptr, "\n==", 3) == 0)
-    return true;
+  for (size_t i = 0; i < PARAGRAPH_ENDING_STRINGS_LEN; i++)
+    {
+      const char *terminator = paragraph_ending_strings[i];
+      if (strncmp (*params->reading_ptr, terminator, strlen (terminator)) == 0)
+        return true;
+    }
 
   return false;
 }
