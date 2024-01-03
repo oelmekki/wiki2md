@@ -301,6 +301,9 @@ paragraph_block_end_parser (parsing_block_end_params_t *params)
         return true;
     }
 
+  if (is_inline_block_template (*params->reading_ptr))
+    return true;
+
   return false;
 }
 

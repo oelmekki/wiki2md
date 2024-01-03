@@ -152,21 +152,19 @@ parse (const char *filename, node_t *root)
             }
 
 
-          if (current_node->can_have_block_children)
+          err = parse_block_start (&current_node, &reading_ptr);
+          if (err)
             {
-              err = parse_block_start (&current_node, &reading_ptr);
-              if (err)
-                {
-                  fprintf (stderr, "parser.c : parse() : error while parsing block start.\n");
-                  return err;
-                }
-
-              if (!current_node)
-                break;
-
-              if (current_node != initial_node)
-                continue;
+              fprintf (stderr, "parser.c : parse() : error while parsing block start.\n");
+              return err;
             }
+
+          if (!current_node)
+            break;
+
+          if (current_node != initial_node)
+            continue;
+
 
           err = parse_inline_start (&current_node, &reading_ptr, buffer, &buffer_ptr);
           if (err)
@@ -177,6 +175,7 @@ parse (const char *filename, node_t *root)
 
           if (current_node != initial_node)
             continue;
+
 
           err = parse_inline_end (&current_node, &reading_ptr, buffer, &buffer_ptr);
           if (err)

@@ -400,9 +400,6 @@ parse_block_start (node_t **current_node, char **reading_ptr)
 {
   int err = 0;
 
-  if (!(*current_node)->can_have_block_children)
-    return err;
-
   /*
    * if there is not at least a markup character and a text character,
    * this can't be anything we're interested in.
@@ -410,8 +407,26 @@ parse_block_start (node_t **current_node, char **reading_ptr)
   if (strlen (*reading_ptr) < 2)
     return err;
 
-  node_t *new_node = NULL;
-  new_node = xalloc (sizeof *new_node);
+  /*
+   * This is a special case, as mediawiki allows to start a template
+   * in the middle of a paragraph, and still display it as a block
+   * level element.
+   */
+  if (is_inline_block_template (*reading_ptr))
+    {
+      node_t *new_node = xalloc (sizeof *new_node);
+      new_node->is_block_level = true;
+      new_node->type = NODE_BLOCKLEVEL_TEMPLATE;
+      *reading_ptr += 2;
+      append_child (*current_node, new_node);
+      *current_node = new_node;
+      return err;
+    }
+
+  if (!(*current_node)->can_have_block_children)
+    return err;
+
+  node_t *new_node = xalloc (sizeof *new_node);
   int new_child_node = 0;
   size_t list_item_markup_len = 0;
 
