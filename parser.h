@@ -5,41 +5,41 @@
 
 // block level nodes
 enum {
-  NODE_BLOCKLEVEL_TEMPLATE,
-  NODE_BULLET_LIST,
-  NODE_BULLET_LIST_ITEM,
-  NODE_DEFINITION_LIST,
-  NODE_DEFINITION_LIST_DEFINITION,
-  NODE_DEFINITION_LIST_TERM,
-  NODE_GALLERY,
-  NODE_GALLERY_ITEM,
-  NODE_HEADING,
-  NODE_HORIZONTAL_RULE,
-  NODE_NUMBERED_LIST,
-  NODE_NUMBERED_LIST_ITEM,
-  NODE_PARAGRAPH,
-  NODE_PREFORMATTED_TEXT,
-  NODE_TABLE,
-  NODE_TABLE_CAPTION,
-  NODE_TABLE_ROW,
+  NODE_BLOCKLEVEL_TEMPLATE,               // 0
+  NODE_BULLET_LIST,                       // 1
+  NODE_BULLET_LIST_ITEM,                  // 2
+  NODE_DEFINITION_LIST,                   // 3
+  NODE_DEFINITION_LIST_DEFINITION,        // 4
+  NODE_DEFINITION_LIST_TERM,              // 5
+  NODE_GALLERY,                           // 6
+  NODE_GALLERY_ITEM,                      // 7
+  NODE_HEADING,                           // 8
+  NODE_HORIZONTAL_RULE,                   // 9
+  NODE_NUMBERED_LIST,                     // 10
+  NODE_NUMBERED_LIST_ITEM,                // 11
+  NODE_PARAGRAPH,                         // 12
+  NODE_PREFORMATTED_TEXT,                 // 13
+  NODE_TABLE,                             // 14
+  NODE_TABLE_CAPTION,                     // 15
+  NODE_TABLE_ROW,                         // 16
   BLOCK_LEVEL_NODES_COUNT,
-  NODE_ROOT, // that one is special
+  NODE_ROOT, // that one is special - 18
 };
 
 // inline nodes
 enum {
-  NODE_TEXT,
-  NODE_EMPHASIS,
-  NODE_EXTERNAL_LINK,
-  NODE_INLINE_TEMPLATE,
-  NODE_INTERNAL_LINK,
-  NODE_MEDIA,
-  NODE_STRONG,
-  NODE_STRONG_AND_EMPHASIS,
-  NODE_TABLE_HEADER,
-  NODE_TABLE_CELL,
+  NODE_TEXT,                    // 0
+  NODE_EMPHASIS,                // 1
+  NODE_EXTERNAL_LINK,           // 2
+  NODE_INLINE_TEMPLATE,         // 3
+  NODE_INTERNAL_LINK,           // 4
+  NODE_MEDIA,                   // 5
+  NODE_STRONG,                  // 6
+  NODE_STRONG_AND_EMPHASIS,     // 7
+  NODE_TABLE_HEADER,            // 8
+  NODE_TABLE_CELL,              // 9
   INLINE_NODES_COUNT,
-  NODE_NOWIKI, // that one is a bit peculiar too
+  NODE_NOWIKI, // that one is a bit peculiar too - 11
 };
 
 typedef struct _node_t {

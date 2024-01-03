@@ -46,3 +46,22 @@ xrealloc (void *mem, size_t msize)
 
   return mem;
 }
+
+/*
+ * Tell if we're in the edge case where a block level template has been started
+ * inside a paragraph (mediawiki syntax allows that).
+ */
+bool
+is_inline_block_template (char *reading_ptr)
+{
+  if (strncmp (reading_ptr, "{{", 2) != 0)
+    return false;
+
+  char *end_of_template = strstr (reading_ptr, "}}");
+  char *end_of_line = strstr (reading_ptr, "\n");
+
+  if (!end_of_template || !end_of_line)
+    return false;
+
+  return end_of_line < end_of_template;
+}
