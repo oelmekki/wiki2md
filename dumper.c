@@ -969,7 +969,11 @@ internal_link_inline_dumper (dumping_params_t *params)
   char *text = strstr (link_def, "|");
   char url[MAX_LINK_LENGTH] = {0};
   char escaped_url[MAX_LINK_LENGTH] = {0};
-  snprintf (url, (text ? (size_t) (text - link_def) : strlen (link_def)) + 1, "%s", link_def);
+  size_t max_len = (text ? (size_t) (text - link_def) : strlen (link_def)) + 1;
+  if (max_len > MAX_LINK_LENGTH)
+    max_len = MAX_LINK_LENGTH;
+
+  snprintf (url, max_len, "%s", link_def);
   escape_url_for_markdown (url, escaped_url);
 
   if (text)
@@ -979,7 +983,10 @@ internal_link_inline_dumper (dumping_params_t *params)
     text = url;
 
   size_t out_len = strlen (text) + strlen (escaped_url) + 7;
-  snprintf (*params->writing_ptr, *params->max_len, "[%s](%s.md)", text, escaped_url);
+  if (out_len > *params->max_len)
+    out_len = *params->max_len - 1;
+
+  snprintf (*params->writing_ptr, *params->max_len - 1, "[%s](%s.md)", text, escaped_url);
   *params->writing_ptr += out_len;
   *params->max_len -= out_len;
 
